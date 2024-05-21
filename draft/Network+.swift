@@ -82,7 +82,7 @@ struct Buy: Codable {
     let title: String?
     let assets: [String]?
     let subtitle: String?
-    let items: [Item]?
+    let items: [Merchant]?
 
     enum CodingKeys: String, CodingKey {
         case type = "type"
@@ -93,7 +93,7 @@ struct Buy: Codable {
     }
 }
 
-struct Item: Codable {
+struct Merchant: Codable {
     let id: String?
     let title: String?
     let disabled: Bool?
