@@ -320,7 +320,8 @@ struct BuySellConfig: View {
         .navigationBarBackButtonHidden(true)
         
         .sheet(isPresented: $showCountry) {
-            BuySellCurrency()
+//            BuySellCurrency()
+            SwapConfig()
                 .environmentObject(vm)
         }
         
@@ -778,10 +779,10 @@ struct Demo: View {
     NavigationView {
 //        Demo()
         
-//        BuySellConfig()
+        BuySellConfig()
         
-        BuySellAmount()
-            .environmentObject(BuySellVM())
+//        BuySellAmount()
+//            .environmentObject(BuySellVM())
         
 //        BuySellMerchant()
 //            .environmentObject(BuySellVM())

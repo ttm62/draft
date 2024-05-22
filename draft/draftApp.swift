@@ -13,6 +13,7 @@ struct draftApp: App {
         WindowGroup {
             NavigationView {
                 BuySellConfig()
+//                SwapConfig()
             }
         }
     }

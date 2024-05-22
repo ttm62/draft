@@ -19,11 +19,15 @@ struct HeaderView<Content: View, Left: View, Right: View>: View {
     var body: some View {
         // simplified body
         HStack{
-            left?()
-            Spacer()
+            if let left {
+                left()
+                Spacer()
+            }
             content()
-            Spacer()
-            right?()
+            if let right {
+                Spacer()
+                right()
+            }
         }
     }
 }
