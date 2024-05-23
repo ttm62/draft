@@ -12,8 +12,11 @@ struct draftApp: App {
     var body: some Scene {
         WindowGroup {
             NavigationView {
-                BuySellConfig()
-//                SwapConfig()
+//                BuySellConfig()
+                SwapConfig()
+                
+//                SwapSlippage()
+//                    .environmentObject(SwapVM())
             }
         }
     }
