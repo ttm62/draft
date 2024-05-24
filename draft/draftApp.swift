@@ -12,11 +12,18 @@ struct draftApp: App {
     var body: some Scene {
         WindowGroup {
             NavigationView {
-//                BuySellConfig()
-                SwapConfig()
+                BuySell()
+//                Swap()
+//                Stake()
                 
 //                SwapSlippage()
 //                    .environmentObject(SwapVM())
+                
+//                StakeProvider(
+//                    provider: .constant("Tonkeeper Queue #1"),
+//                    infoDict: .constant(["APY":"~5%", "Minimal deposit":"1 TON"])
+//                )
+//                .environmentObject(StakeViewModel())
             }
         }
     }

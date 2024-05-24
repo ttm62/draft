@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import Combine
 
 struct Asset {
     var name: String
@@ -31,27 +32,21 @@ class SwapVM: ObservableObject {
         "USDT": Asset(name: "Tether USD", code: "USD₮", balance: 333)
     ]
     
+    // input
+    var shouldCommitChange: Bool = false
     @Published var sendToken: String = ""
-    @Published var sendAmount: Double = 0
+    @Published var sendAmount: String = ""
     @Published var receiveToken: String = ""
+    
+    // computed
     @Published var receiveAmount: Double = 0
+    @Published var detail: SwapDetail?
+    @Published var swapRate: String?
     
-    @Published var detail = SwapDetail()
-    @Published var swapRate = ""
-    
-    @Published var tokenQuery: String = ""
+    // data
     @Published var suggestedTokens: [String] = [
         "usdt",
         "anon",
-        "not",
-        "btc",
-        "grc",
-        
-        "1usdt",
-//        "1anon",
-//        "1not",
-//        "1btc",
-//        "1grc",
     ]
     
     @Published var otherTokens: [String] = [
@@ -62,11 +57,33 @@ class SwapVM: ObservableObject {
         "poveldurev"
     ]
     
+    // searching
+    @Published var isSearching: Bool = false // smooth transition
+    @Published var searchQuery: String = ""
+    @Published var searchResult: [String] = []
+    
+    // setting
     @Published var slippage: Double = 1
     @Published var predefinedSlippage: [Double] = [1,3,5]
     @Published var isExpert = false
     
-    @Published var temp: String = ""
+    var cancellables = Set<AnyCancellable>()
+    
+    init() {
+        Publishers.CombineLatest3($sendToken, $sendAmount, $receiveToken)
+            .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.updateState()
+            }
+            .store(in: &cancellables)
+        
+        $searchQuery
+            .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.performSearch()
+            }
+            .store(in: &cancellables)
+    }
     
     let main: Color = Color.blue
     let layer1: Color = Color(UIColor.secondarySystemBackground)
@@ -76,18 +93,31 @@ class SwapVM: ObservableObject {
     let secondaryLabel: Color = Color.secondary
     let cornerRadius: CGFloat = 14
     
+    var lightFeedback: UIImpactFeedbackGenerator?
+    var mediumFeedback: UIImpactFeedbackGenerator?
+    var heavyFeedback: UIImpactFeedbackGenerator?
+    var rigidFeedback: UIImpactFeedbackGenerator?
+    var softFeedback: UIImpactFeedbackGenerator?
+    
     func updateState() {
-        let dontHaveSendAmount = sendAmount == 0
+        guard shouldCommitChange else { return }
+        
+        // reset
+        self.swapRate = nil
+        self.detail = nil
+        
+        let dontHaveSendToken = sendToken.isEmpty
+        let dontHaveSendAmount = sendAmount.isEmpty
         let dontHaveReceiveToken = receiveToken.isEmpty
         let dontHaveReceiveAmount = receiveAmount == 0
-        let dontHaveProvider = detail.provider == nil
+        let dontHaveProvider = detail?.provider == nil
         
         if dontHaveSendAmount {
             status = .enterAmount
             return
         }
         
-        if dontHaveReceiveToken {
+        if dontHaveSendToken || dontHaveReceiveToken {
             status = .chooseToken
             return
         }
@@ -96,12 +126,10 @@ class SwapVM: ObservableObject {
             status = .loading
             
             // mock loading detail
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: {
-                withAnimation {
-                    self.swapRate = "1 \(self.sendToken) ~= ? \(self.receiveToken)"
-                    self.detail = SwapDetail.defaultInstance
-                    self.status = .ready
-                }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
+                self.swapRate = "1 \(self.sendToken) ~= ? \(self.receiveToken)"
+                self.detail = SwapDetail.defaultInstance
+                self.status = .ready
             })
             
             return
@@ -115,9 +143,38 @@ class SwapVM: ObservableObject {
             return
         }
     }
+    
+    func performSearch() {
+        withAnimation {
+            self.isSearching = !self.searchQuery.isEmpty
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
+            withAnimation {
+                self.searchResult = [["TON"], ["ANON"], []].randomElement()!
+            }
+        })
+    }
+    
+    func initHaptic() {
+        lightFeedback = UIImpactFeedbackGenerator(style: .light)
+        lightFeedback?.prepare()
+        
+        mediumFeedback = UIImpactFeedbackGenerator(style: .medium)
+        mediumFeedback?.prepare()
+        
+        heavyFeedback = UIImpactFeedbackGenerator(style: .heavy)
+        heavyFeedback?.prepare()
+        
+        rigidFeedback = UIImpactFeedbackGenerator(style: .rigid)
+        rigidFeedback?.prepare()
+        
+        softFeedback = UIImpactFeedbackGenerator(style: .soft)
+        softFeedback?.prepare()
+    }
 }
 
-struct SwapConfig: View {
+struct Swap: View {
     @StateObject var vm = SwapVM()
     
     private var numberFormatter: NumberFormatter {
@@ -134,20 +191,12 @@ struct SwapConfig: View {
                 .font(.title3.bold())
                 .foregroundColor(vm.mainLabel)
         } left: {
-            Image(systemName: "slider.horizontal.2.square")
-                .resizable()
-                .foregroundColor(vm.mainLabel)
-                .frame(width: 16, height: 16)
-                .padding(8)
-                .background(vm.layer2)
+            vm.layer2
+                .frame(width: 32, height: 32)
                 .clipShape(Circle())
         } right: {
-            Image(systemName: "xmark")
-                .resizable()
-                .foregroundColor(vm.mainLabel)
-                .frame(width: 16, height: 16)
-                .padding(8)
-                .background(vm.layer2)
+            vm.layer2
+                .frame(width: 32, height: 32)
                 .clipShape(Circle())
         }
         .frame(height: 50)
@@ -169,7 +218,8 @@ struct SwapConfig: View {
                     Text("MAX")
                         .font(.body.bold())
                         .onTapGesture {
-                            vm.sendAmount = asset.balance
+                            vm.mediumFeedback?.impactOccurred()
+                            vm.sendAmount = String(asset.balance)
                         }
                 }
             }
@@ -177,15 +227,10 @@ struct SwapConfig: View {
             HStack(alignment: .center) {
                 buildTokenButton(asset: $vm.sendToken)
                 Spacer()
-                TextField("0", text: $vm.temp)
+                TextField("0", text: $vm.sendAmount)
                     .fixedSize(horizontal: true, vertical: false)
                     .font(.title.bold())
-                    .limitLength($vm.temp, to: 9)
-                    .onReceive(vm.$temp) {
-                        vm.sendAmount = Double("\($0)".prefix(9)) ?? 0
-                        print(vm.sendAmount)
-                        vm.updateState()
-                    }
+                    .limitLength($vm.sendAmount, to: 9)
                     .keyboardType(.decimalPad)
             }
         }
@@ -213,10 +258,10 @@ struct SwapConfig: View {
                     .foregroundColor(vm.mainLabel)
             }
             
-            if !vm.swapRate.isEmpty {
+            if let rate = vm.swapRate, !rate.isEmpty {
                 Divider()
                 HStack(alignment: .center) {
-                    Text(vm.swapRate)
+                    Text(rate)
                     Spacer()
                     ProgressView()
                 }
@@ -225,7 +270,7 @@ struct SwapConfig: View {
                 Divider()
             }
             
-            vm.detail.buildView()
+            vm.detail?.buildView()
         }
         .padding()
         .background(vm.layer2)
@@ -250,6 +295,16 @@ struct SwapConfig: View {
                     .padding(.trailing, 40)
             }
         }
+        .onTapGesture {
+            vm.mediumFeedback?.impactOccurred()
+            
+            // swap
+            let temp = vm.receiveToken
+            vm.receiveToken = vm.sendToken
+            vm.sendToken = temp
+            
+            vm.receiveAmount = 0
+        }
     }
     
     @ViewBuilder
@@ -265,16 +320,6 @@ struct SwapConfig: View {
             
             if case .loading = vm.status {
                 ProgressView()
-            }
-            
-            if case .ready = vm.status {
-                NavigationLink {
-                    SwapConfirm()
-                        .environmentObject(vm)
-                } label: {
-                    Text("Continue")
-                }
-
             }
         }
         .font(.body.bold())
@@ -313,6 +358,27 @@ struct SwapConfig: View {
         }
     }
     
+    @ViewBuilder
+    func buildNavigationToConfirm() -> some View {
+        NavigationLink {
+            SwapConfirm()
+                .environmentObject(vm)
+        } label: {
+            Text("Continue")
+                .padding()
+                .font(.body.bold())
+                .frame(maxWidth: .infinity)
+                .frame(height: 50)
+                .background(vm.layer2)
+                .foregroundColor(vm.mainLabel)
+                .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
+        }
+        .simultaneousGesture(TapGesture().onEnded({ _ in
+            vm.shouldCommitChange = false
+            vm.mediumFeedback?.impactOccurred()
+        }))
+    }
+    
     var body: some View {
         ZStack {
             vm.layer1.ignoresSafeArea()
@@ -320,20 +386,197 @@ struct SwapConfig: View {
             VStack(alignment: .leading, spacing: 16) {
                 buildHeader()
                 
-                ZStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        buildFromAssetView()
-//                            .onAppear {
-//                                vm.sendToken = vm.wallet.keys.first!
-//                            }
-                        buildToAssetView()
+                ScrollView(showsIndicators: false) {
+                    ZStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            buildFromAssetView()
+                            buildToAssetView()
+                        }
+                        buildSwapIcon()
                     }
-                    buildSwapIcon()
+                    
+                    Group {
+                        if case .ready = vm.status {
+                            buildNavigationToConfirm()
+                        } else {
+                            buildSwapButton()
+                        }
+                    }
+                    .padding(.top, 10)
                 }
+            }
+            .navigationBarBackButtonHidden(true)
+            
+            .background(vm.layer1)
+            .padding()
+            
+            .contentShape(Rectangle())
+            .onTapGesture {
+                hideKeyboard()
+            }
+            
+            .onAppear {
+                vm.shouldCommitChange = true
+                if vm.mediumFeedback == nil {
+                    vm.initHaptic()
+                }
+            }
+        }
+    }
+}
+
+struct SwapToken: View {
+    @Environment(\.presentationMode) var presentation
+    
+    @EnvironmentObject var vm: SwapVM
+    @Binding var asset: String
+    
+    @ViewBuilder
+    func buildHeader() -> some View {
+        HeaderView {
+            Text("Choose Token")
+                .font(.title.bold())
+        } right: {
+            vm.layer2
+                .frame(width: 32, height: 32)
+                .clipShape(Circle())
+                .onTapGesture {
+                    presentation.wrappedValue.dismiss()
+                }
+        }
+    }
+    
+    @ViewBuilder
+    func buildSearch() -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .resizable()
+                .frame(width: 16, height: 16)
+            TextField("Search", text: $vm.searchQuery)
+        }
+        .frame(height: 48)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 0)
+        .background(vm.layer2)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+    
+    @ViewBuilder
+    func buildSuggestedToken() -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Suggested")
+                .font(.title3.bold())
+            
+            FlowLayout(vm.suggestedTokens, spacing: 4) { tag in
+                HStack(alignment: .center, spacing: 4) {
+                    vm.layer3
+                        .frame(width: 28, height: 28, alignment: .center)
+                        .clipShape(Circle())
+                    Text(tag)
+                }
+                .foregroundColor(vm.mainLabel)
+                .padding(6)
+                .background(vm.layer2)
+                .clipShape(Capsule(style: .continuous))
+                .onTapGesture {
+                    vm.mediumFeedback?.impactOccurred()
+                    asset = tag.uppercased()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: {
+                        presentation.wrappedValue.dismiss()
+                    })
+                }
+            }
+        }
+    }
+    
+    @ViewBuilder
+    func buildOtherToken() -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Other")
+                .font(.title3.bold())
+            
+            ScrollView {
+                VStack(spacing: 0) {
+                    ForEach(vm.otherTokens) { token in
+                        HStack(alignment: .center, spacing: 16) {
+                            vm.layer2.frame(width: 44, height: 44, alignment: .center)
+                                .clipShape(Circle())
+                            
+                            VStack(alignment: .center, spacing: 2) {
+                                HStack(alignment: .center) {
+                                    Text(token)
+                                    Spacer()
+                                    Text("100000")
+                                }
+                                .font(.body.bold())
+                                .foregroundColor(vm.mainLabel)
+                                
+                                HStack(alignment: .center) {
+                                    Text("toncoin")
+                                    Spacer()
+                                    Text("$600")
+                                }
+                                .font(.callout)
+                                .foregroundColor(vm.secondaryLabel)
+                            }
+                        }
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(height: 76)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            vm.mediumFeedback?.impactOccurred()
+                            asset = token.uppercased()
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: {
+                                presentation.wrappedValue.dismiss()
+                            })
+                        }
+                        
+                        Divider()
+                            .padding(.leading, 16)
+                    }
+                }
+                .background(vm.layer2)
+                .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
+            }
+        }
+    }
+    
+    var body: some View {
+        ZStack {
+            vm.layer1.ignoresSafeArea()
+            
+            VStack(alignment: .leading, spacing: 16) {
+                buildHeader()
+                buildSearch()
                 
-                buildSwapButton()
-                
-                Spacer()
+                if vm.isSearching {
+                    Spacer()
+                    
+                    Group {
+                        if vm.searchResult.isEmpty {
+                            Text("probably nothing")
+                        } else {
+                            Text(vm.searchResult.description)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    
+                    Spacer()
+                } else {
+                    buildSuggestedToken()
+                    buildOtherToken()
+                    
+                    Text("Close")
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(vm.layer2)
+                        .foregroundColor(vm.mainLabel)
+                        .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
+                        .onTapGesture {
+                            presentation.wrappedValue.dismiss()
+                        }
+                }
             }
             .navigationBarBackButtonHidden(true)
             
@@ -348,256 +591,176 @@ struct SwapConfig: View {
     }
 }
 
-struct SwapToken: View {
-    @Environment(\.presentationMode) var presentation
-    
-    @EnvironmentObject var vm: SwapVM
-    @Binding var asset: String
-    
-    var body: some View {
-        ZStack {
-            vm.layer1.ignoresSafeArea()
-            
-            VStack(alignment: .leading, spacing: 16) {
-                HeaderView {
-                    Text("Choose Token")
-                        .font(.title.bold())
-                } right: {
-                    Image(systemName: "xmark")
-                        .resizable()
-                        .frame(width: 16, height: 16)
-                        .padding(8)
-                        .onTapGesture {
-                            presentation.wrappedValue.dismiss()
-                        }
-                }
-
-                HStack(alignment: .center, spacing: 10) {
-                    Image(systemName: "magnifyingglass")
-                        .resizable()
-                        .frame(width: 16, height: 16)
-                    TextField("Search", text: $vm.tokenQuery)
-                }
-                .frame(height: 48)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 0)
-                .background(vm.layer2)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                
-                // Suggested tokens
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Suggested")
-                        .font(.title3.bold())
-                    
-                    FlowLayout(vm.suggestedTokens, spacing: 4) { tag in
-                        HStack(alignment: .center, spacing: 4) {
-                            vm.layer3
-                                .frame(width: 28, height: 28, alignment: .center)
-                                .clipShape(Circle())
-                            Text(tag)
-                        }
-                        .foregroundColor(vm.mainLabel)
-                        .padding(6)
-                        .background(vm.layer2)
-                        .clipShape(Capsule(style: .continuous))
-                        .onTapGesture {
-                            asset = tag.uppercased()
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: {
-                                presentation.wrappedValue.dismiss()
-                            })
-                        }
-                    }
-                }
-                .border(.red, width: 1)
-                
-                // Other tokens
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Other")
-                        .font(.title3.bold())
-                    
-                    ScrollView {
-                        VStack(spacing: 0) {
-                            ForEach(vm.otherTokens) { token in
-                                Button {} label: {
-                                    HStack(alignment: .center, spacing: 16) {
-                                        vm.layer2.frame(width: 44, height: 44, alignment: .center)
-                                            .clipShape(Circle())
-                                        
-                                        VStack(alignment: .center, spacing: 2) {
-                                            HStack(alignment: .center) {
-                                                Text(token)
-                                                Spacer()
-                                                Text("100000")
-                                            }
-                                            .font(.body.bold())
-                                            .foregroundColor(vm.mainLabel)
-                                            
-                                            HStack(alignment: .center) {
-                                                Text("toncoin")
-                                                Spacer()
-                                                Text("$600")
-                                            }
-                                            .font(.callout)
-                                            .foregroundColor(vm.secondaryLabel)
-                                        }
-                                    }
-                                    .padding()
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                                .frame(height: 76)
-                                
-                                Divider()
-                                    .padding(.leading, 16)
-                            }
-                        }
-                        .background(vm.layer2)
-                        .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
-                    }
-                }
-                
-//                Spacer()
-                
-                Text("Close")
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(vm.layer2)
-                    .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
-            }
-            .navigationBarBackButtonHidden(true)
-            
-            .background(vm.layer1)
-            .padding([.top, .horizontal])
-            
-            .contentShape(Rectangle())
-            .onTapGesture {
-                hideKeyboard()
-            }
-        }
-    }
-}
-
 struct SwapConfirm: View {
     @Environment(\.presentationMode) var presentation
     @EnvironmentObject var vm: SwapVM
     
+    @State var swapStatus: SwapStatus = .ready
+    
+    @ViewBuilder
+    func buildHeader() -> some View {
+        HeaderView {
+            Text("Confirm Swap")
+                .font(.title.bold())
+        } right: {
+            vm.layer2
+                .frame(width: 32, height: 32)
+                .clipShape(Circle())
+                .onTapGesture {
+                    presentation.wrappedValue.dismiss()
+                }
+        }
+    }
+    
+    @ViewBuilder
+    func buildFromAssetView() -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center) {
+                Text("Send")
+                Spacer()
+                Text("$6000.01")
+            }
+            .font(.callout)
+            .foregroundColor(vm.secondaryLabel)
+            
+            HStack(alignment: .center) {
+                Button {} label: {
+                    HStack(alignment: .center, spacing: 4) {
+                        Color.primary.frame(width: 24, height: 24)
+                            .clipShape(Capsule())
+                        Text("TON")
+                            .font(.body.bold())
+                            .foregroundColor(vm.mainLabel)
+                    }
+                    .padding(6)
+                    .background(vm.layer3)
+                    .clipShape(Capsule())
+                }
+                .foregroundColor(.white)
+                
+                Spacer()
+                
+                Text("1000")
+                    .font(.title.bold())
+                    .foregroundColor(vm.mainLabel)
+            }
+        }
+        .padding(.horizontal)
+        .frame(height: 100)
+        .background(vm.layer2)
+        .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
+    }
+    
+    @ViewBuilder
+    func buildToAssetView() -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center) {
+                Text("Receive")
+                Spacer()
+                Text("$600010,10")
+            }
+            .font(.callout)
+            .foregroundColor(vm.secondaryLabel)
+            
+            HStack(alignment: .center) {
+                Button {} label: {
+                    HStack(alignment: .center, spacing: 4) {
+                        Color.primary.frame(width: 24, height: 24)
+                            .clipShape(Capsule())
+                        Text("USD₮")
+                            .font(.body.bold())
+                            .foregroundColor(vm.mainLabel)
+                    }
+                    .padding(6)
+                    .background(vm.layer3)
+                    .clipShape(Capsule())
+                }
+                .foregroundColor(.white)
+                
+                Spacer()
+                
+                Text("6000")
+                    .font(.title.bold())
+                    .foregroundColor(vm.mainLabel)
+            }
+            
+            Divider()
+            
+            vm.detail?.buildView()
+        }
+        .padding()
+        .background(vm.layer2)
+        .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
+    }
+    
+    @ViewBuilder
+    func buildConfirmCancel() -> some View {
+        if case .ready = swapStatus {
+            HStack(alignment: .center, spacing: 16) {
+                Text("Cancel")
+                    .font(.headline.bold())
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(vm.layer2)
+                    .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
+                    .onTapGesture {
+                        vm.mediumFeedback?.impactOccurred()
+                    }
+                
+                Text("Confirm")
+                    .font(.headline.bold())
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(vm.main)
+                    .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
+                    .onTapGesture {
+                        vm.mediumFeedback?.impactOccurred()
+                        
+                        swapStatus = .loading
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
+                            withAnimation {
+                                swapStatus = .success
+                            }
+                        })
+                    }
+            }
+        }
+        
+        if case .loading = swapStatus {
+            Text("Loading ...")
+                .font(.callout.bold())
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding()
+        }
+        
+        if case .success = swapStatus {
+            Text("Done")
+                .frame(maxWidth: .infinity, alignment: .center)
+                .font(.callout.bold())
+                .foregroundColor(.green)
+                .padding()
+        }
+    }
+    
     var body: some View {
         ZStack {
             vm.layer1.ignoresSafeArea()
             
             VStack(alignment: .leading, spacing: 16) {
-                HeaderView {
-                    Text("Confirm Swap")
-                        .font(.title.bold())
-                } right: {
-                    Image(systemName: "xmark")
-                        .frame(width: 16, height: 16)
-                        .padding(8)
-                        .background(vm.layer2)
-                        .clipShape(Circle())
-                        .onTapGesture {
-                            presentation.wrappedValue.dismiss()
-                        }
-                }
+                buildHeader()
                 
                 VStack(alignment: .leading, spacing: 10) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack(alignment: .center) {
-                            Text("Send")
-                            Spacer()
-                            Text("$6000.01")
-                        }
-                        .font(.callout)
-                        .foregroundColor(vm.secondaryLabel)
-                        
-                        HStack(alignment: .center) {
-                            Button {} label: {
-                                HStack(alignment: .center, spacing: 4) {
-                                    Color.primary.frame(width: 24, height: 24)
-                                        .clipShape(Capsule())
-                                    Text("TON")
-                                        .font(.body.bold())
-                                        .foregroundColor(vm.mainLabel)
-                                }
-                                .padding(6)
-                                .background(vm.layer3)
-                                .clipShape(Capsule())
-                            }
-                            .foregroundColor(.white)
-                            
-                            Spacer()
-                            
-                            Text("1000")
-                                .font(.title.bold())
-                                .foregroundColor(vm.mainLabel)
-                        }
-                    }
-                    .padding(.horizontal)
-                    .frame(height: 100)
-                    .background(vm.layer2)
-                    .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
-                    
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack(alignment: .center) {
-                            Text("Receive")
-                            Spacer()
-                            Text("$600010,10")
-                        }
-                        .font(.callout)
-                        .foregroundColor(vm.secondaryLabel)
-                        
-                        HStack(alignment: .center) {
-                            Button {} label: {
-                                HStack(alignment: .center, spacing: 4) {
-                                    Color.primary.frame(width: 24, height: 24)
-                                        .clipShape(Capsule())
-                                    Text("USD₮")
-                                        .font(.body.bold())
-                                        .foregroundColor(vm.mainLabel)
-                                }
-                                .padding(6)
-                                .background(vm.layer3)
-                                .clipShape(Capsule())
-                            }
-                            .foregroundColor(.white)
-                            
-                            Spacer()
-                            
-                            Text("6000")
-                                .font(.title.bold())
-                                .foregroundColor(vm.mainLabel)
-                        }
-                        
-                        Divider()
-                        
-                        vm.detail.buildView()
-                    }
-                    .padding()
-                    .background(vm.layer2)
-                    .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
+                    buildFromAssetView()
+                    buildToAssetView()
                 }
 
                 Spacer()
-                
-                HStack(alignment: .center, spacing: 16) {
-                    Text("Cancel")
-                        .font(.headline.bold())
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(vm.layer2)
-                        .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
-                    
-                    Text("Confirm")
-                        .font(.headline.bold())
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(vm.main)
-                        .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
-                }
+                buildConfirmCancel()
             }
             .navigationBarBackButtonHidden(true)
             
             .background(vm.layer1)
-            .padding([.top, .horizontal])
+            .padding()
             
             .contentShape(Rectangle())
             .onTapGesture {
@@ -614,12 +777,6 @@ struct SwapSlippage: View {
     @EnvironmentObject var vm: SwapVM
     
     @State var temp: String = ""
-    
-    @State private var lightFeedback: UIImpactFeedbackGenerator?
-    @State private var mediumFeedback: UIImpactFeedbackGenerator?
-    @State private var heavyFeedback: UIImpactFeedbackGenerator?
-    @State private var rigidFeedback: UIImpactFeedbackGenerator?
-    @State private var softFeedback: UIImpactFeedbackGenerator?
     
     @ViewBuilder
     func textField(amount: Binding<Double>, isFocus: Binding<Bool>, asset: String) -> some View {
@@ -653,92 +810,108 @@ struct SwapSlippage: View {
         }
     }
     
+    @ViewBuilder
+    func buildHeader() -> some View {
+        HeaderView {
+            Text("Settings")
+                .font(.title.bold())
+        } right: {
+            Image(systemName: "xmark")
+                .frame(width: 16, height: 16)
+                .padding(8)
+                .background(vm.layer2)
+                .clipShape(Circle())
+                .onTapGesture {
+                    presentation.wrappedValue.dismiss()
+                }
+        }
+    }
+    
+    @ViewBuilder
+    func buildExpertMode() -> some View {
+        Toggle(isOn: $vm.isExpert) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Expert Mode")
+                    .font(.headline.bold())
+                    .foregroundColor(vm.mainLabel)
+                
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Allows high price impact trades.")
+                    Text("Use at your own risk.")
+                }
+                .font(.callout)
+                .foregroundColor(vm.secondaryLabel)
+            }
+        }
+        .padding()
+        .background(vm.layer2)
+        .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
+        .onChange(of: vm.isExpert) { value in
+            if !vm.isExpert {
+                vm.slippage = vm.predefinedSlippage.first!
+            }
+        }
+    }
+    
+    @ViewBuilder
+    func buildCustomSlippage() -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Slippage")
+                .font(.headline.bold())
+            Text(LocalizedStringKey("The amount the price can change \nunfavorably before the trade reverts"))
+                .font(.callout)
+                .foregroundColor(vm.secondaryLabel)
+        }
+        
+        if vm.isExpert {
+            textField(amount: $vm.slippage, isFocus: .constant(false), asset: "%")
+                .padding()
+                .background(vm.layer2)
+                .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
+        } else {
+            HStack(alignment: .center, spacing: 4) {
+                Text("Custom %")
+                Spacer()
+            }
+            .padding()
+            .foregroundColor(vm.secondaryLabel)
+            .background(vm.layer2)
+            .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
+            .keyboardType(.decimalPad)
+        }
+    }
+    
+    @ViewBuilder
+    func buildPredefinedSlippage() -> some View {
+        HStack(alignment: .center, spacing: 16) {
+            ForEach(vm.predefinedSlippage, id: \.description) { slippage in
+                Text(String(format: "%.0f%%", slippage))
+                    .font(.callout.bold())
+                    .padding()
+                    .frame(maxWidth: .infinity)
+                    .background(vm.layer2)
+                    .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
+                    .onTapGesture {
+                        vm.slippage = slippage
+                        vm.mediumFeedback?.impactOccurred()
+                    }
+                    .overlay(
+                        RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous)
+                            .stroke(vm.main, lineWidth: vm.slippage == slippage ? 2 : 0)
+                    )
+            }
+        }
+    }
+    
     var body: some View {
         ZStack {
             vm.layer1.ignoresSafeArea()
             
             VStack(alignment: .leading, spacing: 16) {
-                HeaderView {
-                    Text("Settings")
-                        .font(.title.bold())
-                } right: {
-                    Image(systemName: "xmark")
-                        .frame(width: 16, height: 16)
-                        .padding(8)
-                        .background(vm.layer2)
-                        .clipShape(Circle())
-                        .onTapGesture {
-                            presentation.wrappedValue.dismiss()
-                        }
-                }
-                
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Slippage")
-                        .font(.headline.bold())
-                    Text(LocalizedStringKey("The amount the price can change \nunfavorably before the trade reverts"))
-                        .font(.callout)
-                        .foregroundColor(vm.secondaryLabel)
-                }
-                
-                if vm.isExpert {
-                    textField(amount: $vm.slippage, isFocus: .constant(false), asset: "%")
-                        .padding()
-                        .background(vm.layer2)
-                        .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
-                } else {
-                    HStack(alignment: .center, spacing: 4) {
-                        Text("Custom %")
-                        Spacer()
-                    }
-                    .padding()
-                    .foregroundColor(vm.secondaryLabel)
-                    .background(vm.layer2)
-                    .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
-                    .keyboardType(.decimalPad)
-                }
-                
-                HStack(alignment: .center, spacing: 16) {
-                    ForEach(vm.predefinedSlippage, id: \.description) { slippage in
-                        Text(String(format: "%.0f%%", slippage))
-                            .font(.callout.bold())
-                            .padding()
-                            .frame(maxWidth: .infinity)
-                            .background(vm.layer2)
-                            .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
-                            .onTapGesture {
-                                vm.slippage = slippage
-                                mediumFeedback?.impactOccurred()
-                            }
-                            .overlay(
-                                RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous)
-                                    .stroke(vm.main, lineWidth: vm.slippage == slippage ? 2 : 0)
-                            )
-                    }
-                }
-                
-                Toggle(isOn: $vm.isExpert) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Expert Mode")
-                            .font(.headline.bold())
-                            .foregroundColor(vm.mainLabel)
-                        
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Allows high price impact trades.")
-                            Text("Use at your own risk.")
-                        }
-                        .font(.callout)
-                        .foregroundColor(vm.secondaryLabel)
-                    }
-                }
-                .padding()
-                .background(vm.layer2)
-                .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
-                .onChange(of: vm.isExpert) { value in
-                    if !vm.isExpert {
-                        vm.slippage = vm.predefinedSlippage.first!
-                    }
-                }
-                
+                buildHeader()
+                buildCustomSlippage()
+                buildPredefinedSlippage()
+                buildExpertMode()
                 Spacer()
             }
             .navigationBarBackButtonHidden(true)
@@ -762,28 +935,12 @@ struct SwapSlippage: View {
             }
             .padding()
         }
-        .onAppear {
-            lightFeedback = UIImpactFeedbackGenerator(style: .light)
-            lightFeedback?.prepare()
-            
-            mediumFeedback = UIImpactFeedbackGenerator(style: .medium)
-            mediumFeedback?.prepare()
-            
-            heavyFeedback = UIImpactFeedbackGenerator(style: .heavy)
-            heavyFeedback?.prepare()
-            
-            rigidFeedback = UIImpactFeedbackGenerator(style: .rigid)
-            rigidFeedback?.prepare()
-            
-            softFeedback = UIImpactFeedbackGenerator(style: .soft)
-            softFeedback?.prepare()
-        }
     }
 }
 
 #Preview {
     NavigationView {
-        SwapConfig()
+        Swap()
         
 //        SwapToken()
 //        SwapConfirm()

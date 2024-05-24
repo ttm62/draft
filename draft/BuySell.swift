@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 enum PayMethod: String, CaseIterable{
     case creditCardVisaMaster = "creditcard.global"
@@ -46,7 +47,7 @@ class BuySellVM: ObservableObject {
     
     // params
     @Published var isBuy: Bool = true
-    @Published var amount: Double = 0
+    @Published var amount: String = "0"
     @Published var country: String = "us"
     @Published var method: String = PayMethod.creditCardVisaMaster.rawValue
     @Published var merchant: String = "" // service provider
@@ -66,11 +67,22 @@ class BuySellVM: ObservableObject {
         "CA": "Canada Dollar",
     ]
     
+    let main: Color = Color.blue
+    let layer1: Color = Color(UIColor.secondarySystemBackground)
+    let layer2: Color = Color(UIColor.secondarySystemFill)
+    let layer3: Color = Color(UIColor.secondaryLabel)
+    let mainLabel: Color = Color.primary
+    let secondaryLabel: Color = Color.secondary
+    
+    let cornerRadius: CGFloat = 10
+    
     func update(completion: FiatMethodHandler? = nil) {
         Network(apiFetcher: APIFetcher()).getFiatMethods { result in
             switch result {
             case .success(let data):
-                self.resp = data
+                withAnimation {
+                    self.resp = data
+                }
                 
                 // TODO: update default params
                 if let countries = data.data?.layoutByCountry {
@@ -125,33 +137,25 @@ class BuySellVM: ObservableObject {
     }
 }
 
-extension View {
-    func hideKeyboard() {
-        let resign = #selector(UIResponder.resignFirstResponder)
-        UIApplication.shared.sendAction(resign, to: nil, from: nil, for: nil)
-    }
-}
-
-struct BuySellConfig: View {
+struct BuySell: View {
     @StateObject var vm: BuySellVM = BuySellVM()
     
-    @State private var temp = "0"
     @State var showCountry = false
     
     @ViewBuilder
     func textField() -> some View {
         HStack(alignment: .center, spacing: 4) {
-            DynamicFontSizeTextField(text: $temp, maxLength: 15)
+            DynamicFontSizeTextField(text: $vm.amount, maxLength: 15)
                 .fixedSize(horizontal: true, vertical: false)
                 .keyboardType(.decimalPad)
-                .foregroundColor(Color.white)
+                .foregroundColor(vm.mainLabel)
                 .multilineTextAlignment(.center)
 
             Button {} label: {
                 Text(vm.asset)
-                    .font(.system(size: DynamicFontSizeTextField.dynamicSize(temp), weight: .bold, design: .default))
+                    .font(.system(size: DynamicFontSizeTextField.dynamicSize(vm.amount), weight: .bold, design: .default))
             }
-            .foregroundColor(Color.gray.opacity(0.8))
+            .foregroundColor(vm.secondaryLabel)
             
 //            Picker("Token?", selection: $vm.asset) {
 //                ForEach(vm.assets, id: \.self) { key in
@@ -163,171 +167,193 @@ struct BuySellConfig: View {
         }
     }
     
-    var body: some View {
-        VStack {
-            HeaderView {
-                HStack(alignment: .center, spacing: 8) {
-                    Button {
-                        vm.isBuy = true
-                        vm.updateMerchants()
-                    } label: {
-                        VStack(alignment: .center, spacing: 4) {
-                            Text("Buy")
-                                .font(.title3.bold())
-                            
-                            if vm.isBuy {
-                                Color.blue
-                                    .frame(height: 3)
-                                    .frame(maxWidth: .infinity)
-                            } else {
-                                Color.clear
-                                    .frame(height: 3)
-                                    .frame(maxWidth: .infinity)
-                            }
-                        }
-                        .frame(width: 50)
-                    }
-                    .foregroundColor(vm.isBuy ? .primary : .secondary)
+    @ViewBuilder
+    func buildBuySellHeader() -> some View {
+        HStack(alignment: .center, spacing: 8) {
+            Button {
+                vm.isBuy = true
+                vm.updateMerchants()
+            } label: {
+                VStack(alignment: .center, spacing: 4) {
+                    Text("Buy")
+                        .font(.title3.bold())
                     
-                    Button {
-                        vm.isBuy = false
-                        // vm.updateMerchants()
-                    } label: {
-                        VStack(alignment: .center, spacing: 4) {
-                            Text("Sell")
-                                .font(.title3.bold())
-                            
-                            if !vm.isBuy {
-                                Color.blue
-                                    .frame(height: 3)
-                                    .frame(maxWidth: .infinity)
-                            } else {
-                                Color.clear
-                                    .frame(height: 3)
-                                    .frame(maxWidth: .infinity)
-                            }
-                        }
-                        .frame(width: 56)
+                    if vm.isBuy {
+                        Color.blue
+                            .frame(height: 3)
+                            .frame(maxWidth: .infinity)
+                    } else {
+                        Color.clear
+                            .frame(height: 3)
+                            .frame(maxWidth: .infinity)
                     }
-                    .foregroundColor(!vm.isBuy ? .primary : .secondary)
                 }
-            } left: {
-                Button {
+                .frame(width: 50)
+            }
+            .foregroundColor(vm.isBuy ? .primary : .secondary)
+            
+            Button {
+                vm.isBuy = false
+                // vm.updateMerchants()
+            } label: {
+                VStack(alignment: .center, spacing: 4) {
+                    Text("Sell")
+                        .font(.title3.bold())
+                    
+                    if !vm.isBuy {
+                        Color.blue
+                            .frame(height: 3)
+                            .frame(maxWidth: .infinity)
+                    } else {
+                        Color.clear
+                            .frame(height: 3)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .frame(width: 56)
+            }
+            .foregroundColor(!vm.isBuy ? .primary : .secondary)
+        }
+    }
+    
+    @ViewBuilder
+    func buildHeader() -> some View {
+        HeaderView {
+            buildBuySellHeader()
+        } left: {
+            Text(vm.country)
+                .font(.body)
+                .padding()
+                .onTapGesture {
                     showCountry = true
-                } label: {
-                    Text(vm.country)
-                        .font(.callout.bold())
                 }
-                .padding(.vertical, 6)
-                .padding(.horizontal, 8)
-                .foregroundColor(Color.primary)
-                .background(Color(UIColor.secondarySystemBackground))
-                .clipShape(Capsule())
-                
-//                Text("FR")
-//                    .padding(8)
-//                    .font(.body.bold())
-//                    .background(Color(UIColor.secondarySystemBackground))
-//                    .clipShape(Capsule())
-//                    .onTapGesture {
-//                        showCountry = true
-//                    }
-            } right: {
-                Button {} label: {
-                    Text("x")
-                        .font(.body.bold())
-                }
-            }
-            .frame(height: 50)
-            
-            if vm.resp.data == nil {
-                Spacer()
-                Text("Loading ..")
-            } else {
-                
-                VStack(alignment: .center, spacing: 14) {
-                    textField()
-                    
-                    VStack(alignment: .center, spacing: 12) {
-                        Text("6000.01 USD")
-                            .padding(8)
-                            .font(.caption)
-                            .foregroundColor(Color(UIColor.secondaryLabel))
-                            .overlay(
-                                Capsule()
-                                    .stroke(Color.secondary, lineWidth: 1)
-                            )
-                        
-                        Text("Min. amount: 50 TON")
-                            .font(.caption)
-                            .foregroundColor(Color(UIColor.secondaryLabel))
-                    }
-                }
-                .padding(.vertical, 16)
-                .frame(maxWidth: .infinity)
-                .background(Color(UIColor.secondarySystemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .frame(height: 160)
-                
-                ScrollView {
-                    VStack(spacing: 0) {
-                        ForEach(PayMethod.allCases, id: \.rawValue) { method in
-                            Button {
-                                vm.method = method.rawValue
-                            } label: {
-                                HStack {
-                                    vm.method == method.rawValue ?
-//                                        Image("ic.radio.selected") : Image("ic.radio.unselect")
-                                    Text("x") : Text("-")
-                                    
-                                    Text(method.getName())
-                                        .multilineTextAlignment(.leading)
-                                        .padding(.leading, 6)
-                                    
-                                    Spacer()
-                                    
-                                    Image(method.getImage())
-                                }
-                            }
-                            .frame(height: 50)
-                            .padding(.leading, 10)
-                            .font(.system(size: 16, weight: .medium, design: .rounded))
-                        }
-                    }
-                    .background(Color(UIColor.secondarySystemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                }
-            }
-            
+        } right: {
+            vm.layer2
+                .frame(width: 32, height: 32)
+                .clipShape(Circle())
+        }
+        .frame(height: 50)
+    }
+    
+    @ViewBuilder
+    func buildLoading() -> some View {
+        Group {
             Spacer()
+            Text("Loading ..")
+        }
+    }
+    
+    @ViewBuilder
+    func buildAmountInput() -> some View {
+        VStack(alignment: .center, spacing: 14) {
+            textField()
             
-            if vm.resp.data != nil {
-                NavigationLink {
-                    BuySellMerchant()
-                        .environmentObject(vm)
+            VStack(alignment: .center, spacing: 12) {
+                Text("6000.01 USD")
+                    .padding(8)
+                    .font(.caption)
+                    .foregroundColor(vm.secondaryLabel)
+                    .overlay(
+                        Capsule()
+                            .stroke(vm.secondaryLabel, lineWidth: 1)
+                    )
+                
+                Text("Min. amount: 50 TON")
+                    .font(.caption)
+                    .foregroundColor(vm.secondaryLabel)
+            }
+        }
+        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity)
+        .background(vm.layer2)
+        .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
+        .frame(height: 160)
+    }
+    
+    @ViewBuilder
+    func buildPaymentOptions() -> some View {
+        VStack(spacing: 0) {
+            ForEach(PayMethod.allCases, id: \.rawValue) { method in
+                Button {
+                    vm.method = method.rawValue
                 } label: {
-                    Text("Continue")
+                    HStack {
+                        vm.method == method.rawValue ?
+//                                        Image("ic.radio.selected") : Image("ic.radio.unselect")
+                        Text("x") : Text("-")
+                        
+                        Text(method.getName())
+                            .multilineTextAlignment(.leading)
+                            .padding(.leading, 6)
+                        
+                        Spacer()
+                        
+                        Image(method.getImage())
+                    }
                 }
-                .buttonStyle(BigButtonStyle(backgroundColor: .blue, textColor: .white))
+                .frame(height: 50)
+                .padding(.leading, 10)
+                .font(.system(size: 16, weight: .medium, design: .rounded))
             }
         }
-        .onAppear {
-            if vm.resp.data == nil {
-                vm.update()
+        .background(vm.layer2)
+        .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
+    }
+    
+    @ViewBuilder
+    func buildContinueButton() -> some View {
+        if vm.resp.data != nil {
+            NavigationLink {
+                BuySellMerchant()
+                    .environmentObject(vm)
+            } label: {
+                Text("Continue")
+                    .font(.headline.bold())
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .foregroundColor(vm.mainLabel)
+                    .background(vm.main)
+                    .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
             }
         }
-        .padding()
-        .navigationBarBackButtonHidden(true)
-        
-        .sheet(isPresented: $showCountry) {
-//            BuySellCurrency()
-            SwapConfig()
-                .environmentObject(vm)
-        }
-        
-        .contentShape(Rectangle())
-        .onTapGesture {
-            hideKeyboard()
+    }
+    
+    var body: some View {
+        ZStack {
+            vm.layer1.ignoresSafeArea()
+            
+            VStack {
+                buildHeader()
+                
+                if vm.resp.data == nil {
+                    buildLoading()
+                } else {
+                    ScrollView {
+                        buildAmountInput()
+                        buildPaymentOptions()
+                    }
+                }
+                
+                Spacer()
+                buildContinueButton()
+            }
+            .onAppear {
+                if vm.resp.data == nil {
+                    vm.update()
+                }
+            }
+            .padding()
+            .navigationBarBackButtonHidden(true)
+            
+            .sheet(isPresented: $showCountry) {
+                BuySellCurrency()
+                    .environmentObject(vm)
+            }
+            
+            .contentShape(Rectangle())
+            .onTapGesture {
+                hideKeyboard()
+            }
         }
     }
 }
@@ -453,59 +479,72 @@ struct BuySellCurrency: View {
     @Environment(\.presentationMode) var presentation
     @EnvironmentObject var vm: BuySellVM
     
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HeaderView {
-                Text("Currency")
-            } left: {
-                Text("")
-            } right: {
-                Button {
+    @ViewBuilder
+    func buildHeader() -> some View {
+        HeaderView {
+            Text("Currency")
+                .font(.title3.bold())
+        } left: {
+            Color.clear
+                .frame(width: 32, height: 32)
+        } right: {
+            vm.layer2
+                .frame(width: 32, height: 32)
+                .clipShape(Circle())
+                .onTapGesture {
                     presentation.wrappedValue.dismiss()
-                } label: {
-//                    Image(systemName: "xmark")
-                    Text("x")
+                }
+        }
+        .frame(height: 50)
+    }
+    
+    @ViewBuilder
+    func buildCountryList() -> some View {
+        VStack(spacing: 0) {
+            ForEach(vm.countries) { country in
+                if country.currency != "-" {
+                    HStack(alignment: .center) {
+                        Text((country.currency ?? "").uppercased())
+                            .font(.body.bold())
+                            .foregroundColor(vm.mainLabel)
+                        
+                        if let info = BuySellVM.countriesInfo[country.countryCode ?? ""] {
+                            Text(info)
+                                .font(.body)
+                                .foregroundColor(vm.secondaryLabel)
+                        }
+                        
+                        Spacer()
+
+                        if vm.country == country.countryCode ?? "" {
+//                                        Image("ic.currency.checkmark")
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                    .padding(.horizontal)
+                    .frame(height: 50)
+                    
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        vm.country = country.countryCode ?? ""
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: {
+                            presentation.wrappedValue.dismiss()
+                        })
+                    }
                 }
             }
-            .frame(height: 50)
+        }
+        .background(vm.layer2)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            buildHeader()
             
             if !vm.countries.isEmpty {
                 ScrollView {
-                    VStack(spacing: 0) {
-                        ForEach(vm.countries) { country in
-                            if country.currency != "-" {
-                                Button {
-                                    vm.country = country.countryCode ?? ""
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: {
-                                        presentation.wrappedValue.dismiss()
-                                    })
-                                } label: {
-                                    HStack(alignment: .center) {
-                                        Text((country.currency ?? "").uppercased())
-                                            .font(.body.bold())
-                                        
-                                        if let info = BuySellVM.countriesInfo[country.countryCode ?? ""] {
-                                            Text(info)
-                                                .font(.body)
-                                                .foregroundColor(Color.secondary)
-                                        }
-                                        
-                                        Spacer()
-        
-                                        if vm.country == country.countryCode ?? "" {
-    //                                        Image("ic.currency.checkmark")
-                                            Image(systemName: "checkmark")
-                                        }
-                                    }
-                                    .padding(.horizontal)
-                                }
-                                .frame(height: 50)
-                                .foregroundColor(Color.primary)
-                            }
-                        }
-                    }
-                    .background(Color(UIColor.secondarySystemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    buildCountryList()
                 }
             }
         }
@@ -620,7 +659,7 @@ struct BuySellAmount: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .foregroundColor(Color(UIColor.secondaryLabel))
                             
-                            textField(amount: $vm.amount, isFocus: $isFocus, asset: currency)
+                            textField(isFocus: $isFocus, asset: currency)
                         }
                         .frame(maxWidth: .infinity)
                         .padding()
@@ -639,7 +678,8 @@ struct BuySellAmount: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .foregroundColor(Color(UIColor.secondaryLabel))
                         
-                        textField(amount: $getAmount, isFocus: .constant(false), asset: vm.asset)
+//                        textField(amount: $getAmount, isFocus: .constant(false), asset: vm.asset)
+                        Text("0.000")
                             .disabled(true)
                     }
                     .frame(maxWidth: .infinity)
@@ -654,46 +694,7 @@ struct BuySellAmount: View {
                     )
                 }
             } else {
-                VStack(alignment: .leading, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("You sell")
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .foregroundColor(Color(UIColor.secondaryLabel))
-                        
-                        textField(amount: $getAmount, isFocus: $isFocus, asset: vm.asset)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(Color(UIColor.secondarySystemBackground))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .stroke(isFocus ? Color.blue : Color.clear, lineWidth: 2)
-                    )
-                    
-                    if let currency = vm.countries.first(where: { $0.countryCode?.uppercased() == vm.country.uppercased() })?.currency?.uppercased() {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("You get")
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .foregroundColor(Color(UIColor.secondaryLabel))
-                            
-                            textField(amount: $vm.amount, isFocus: .constant(false), asset: currency)
-                                .disabled(true)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .fill(Color(UIColor.secondarySystemBackground))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .stroke(isFocus ? Color.blue : Color.clear, lineWidth: 2)
-                        )
-                    }
-                }
+                Text("Fixing")
             }
             
             Spacer()
@@ -727,19 +728,9 @@ struct BuySellAmount: View {
     }
     
     @ViewBuilder
-    func textField(amount: Binding<Double>, isFocus: Binding<Bool>, asset: String) -> some View {
-        let text = Binding<String>(
-            get: {
-                amount.wrappedValue > 0 ?
-                    String(format: "%.2f", amount.wrappedValue) : "0"
-            },
-            set: { text in
-                vm.amount = Double(text) ?? 0
-            }
-        )
-        
+    func textField(isFocus: Binding<Bool>, asset: String) -> some View {
         HStack(alignment: .center, spacing: 4) {
-            TextField("", text: text, onEditingChanged: { edit in
+            TextField("", text: $vm.amount, onEditingChanged: { edit in
                 isFocus.wrappedValue = edit
             })
             .keyboardType(.decimalPad)
@@ -779,7 +770,7 @@ struct Demo: View {
     NavigationView {
 //        Demo()
         
-        BuySellConfig()
+        BuySell()
         
 //        BuySellAmount()
 //            .environmentObject(BuySellVM())
@@ -801,7 +792,7 @@ struct DynamicFontSizeTextField: UIViewRepresentable {
         let textField = UITextField()
         textField.delegate = context.coordinator
         textField.text = text
-        textField.font = UIFont.systemFont(ofSize: DynamicFontSizeTextField.dynamicSize(text))
+        textField.font = UIFont.systemFont(ofSize: DynamicFontSizeTextField.dynamicSize(text), weight: .bold)
         textField.textColor = UIColor.label
         textField.textAlignment = .center
         textField.keyboardType = .decimalPad
