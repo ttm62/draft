@@ -9,22 +9,47 @@ import SwiftUI
 
 @main
 struct draftApp: App {
+    
+    @State var showBuySell: Bool = false
+    @State var showSwap: Bool = false
+    @State var showStake: Bool = false
+    
     var body: some Scene {
         WindowGroup {
+//            Demo()
+            
             NavigationView {
-                BuySell()
-//                Swap()
-//                Stake()
+                VStack {
+                    Spacer()
+                    Text("BuySell").onTapGesture{ showBuySell = true }
+                    Spacer()
+                    Text("Swap").onTapGesture{ showSwap = true }
+                    Spacer()
+                    Text("Stake").onTapGesture{ showStake = true }
+                    Spacer()
+                }
                 
-//                SwapSlippage()
-//                    .environmentObject(SwapVM())
+                .sheet(isPresented: $showBuySell, content: {
+                    NavigationView {
+                        BuySell(vm: BuySellVM(didTapDismiss: {
+                            showBuySell = false
+                        }))
+                    }
+                })
                 
-//                StakeProvider(
-//                    provider: .constant("Tonkeeper Queue #1"),
-//                    infoDict: .constant(["APY":"~5%", "Minimal deposit":"1 TON"])
-//                )
-//                .environmentObject(StakeViewModel())
+                .sheet(isPresented: $showSwap, content: {
+                    NavigationView { Swap(vm: SwapVM(didTapDismiss: {
+                        showSwap = false
+                    }))}
+                })
+                
+                .sheet(isPresented: $showStake, content: {
+                    NavigationView { Stake(vm: StakeViewModel(didTapDismiss: {
+                        showStake = false
+                    }))}
+                })
             }
+            
         }
     }
 }

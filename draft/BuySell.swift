@@ -8,6 +8,8 @@
 import SwiftUI
 import UIKit
 
+typealias FiatMethodHandler = (Result<FiatMethodResponse, HTTPError>) -> Void
+
 enum PayMethod: String, CaseIterable{
     case creditCardVisaMaster = "creditcard.global"
     case creditCardRUB = "creditcard.rub"
@@ -33,25 +35,7 @@ enum PayMethod: String, CaseIterable{
     }
 }
 
-typealias FiatMethodHandler = (Result<FiatMethodResponse, HTTPError>) -> Void
-
-@MainActor final
-class BuySellVM: ObservableObject {
-    @Published var resp: FiatMethodResponse = .init(success: nil, data: nil)
-    @Published var error: String = ""
-    
-    @Published var countries: [CountryLayout] = []
-    @Published var assets: [String] = []
-    @Published var asset: String = "TON"
-    @Published var merchants: [Merchant] = []
-    
-    // params
-    @Published var isBuy: Bool = true
-    @Published var amount: String = "0"
-    @Published var country: String = "us"
-    @Published var method: String = PayMethod.creditCardVisaMaster.rawValue
-    @Published var merchant: String = "" // service provider
-    
+extension BuySellVM {
     static let countriesInfo: [String: String] = [
         "RU": "Russia Ruble",
         "UA": "Ukraine Hryvnia",
@@ -66,7 +50,37 @@ class BuySellVM: ObservableObject {
         "NG": "Nigeria Naira",
         "CA": "Canada Dollar",
     ]
+}
+
+final
+class BuySellVM: ObservableObject {
+    var didTapDismiss: EmptyHandler?
     
+    // computed from api
+    @Published var resp: FiatMethodResponse = .init(success: nil, data: nil)
+    @Published var error: String = ""
+    @Published var countries: [CountryLayout] = []
+    @Published var assets: [String] = []
+    @Published var merchants: [Merchant] = []
+    @Published var minAmount: Double = 50
+    
+    let maxInputLength: Int = 13
+    
+    // default params
+    @Published var isBuy: Bool = true
+    @Published var amount: String = "0"
+    @Published var asset: String = "TON"
+    @Published var rate: Double = 6.1
+    @Published var currency: String = "USD"
+    @Published var country: String = "US"
+    @Published var method: String = PayMethod.creditCardVisaMaster.rawValue
+    @Published var merchant: String = "" // service provider
+    
+    init(didTapDismiss: EmptyHandler? = nil) {
+        self.didTapDismiss = didTapDismiss
+    }
+    
+    // theme
     let main: Color = Color.blue
     let layer1: Color = Color(UIColor.secondarySystemBackground)
     let layer2: Color = Color(UIColor.secondarySystemFill)
@@ -74,29 +88,57 @@ class BuySellVM: ObservableObject {
     let mainLabel: Color = Color.primary
     let secondaryLabel: Color = Color.secondary
     
+    let tagTint: Color = Color.blue
+    let tagBackground: Color = Color.blue.opacity(0.3)
     let cornerRadius: CGFloat = 10
     
+    // haptic
+    var lightFeedback: UIImpactFeedbackGenerator?
+    var mediumFeedback: UIImpactFeedbackGenerator?
+    var heavyFeedback: UIImpactFeedbackGenerator?
+    var rigidFeedback: UIImpactFeedbackGenerator?
+    var softFeedback: UIImpactFeedbackGenerator?
+    
+    func initHaptic() {
+        lightFeedback = UIImpactFeedbackGenerator(style: .light)
+        lightFeedback?.prepare()
+        
+        mediumFeedback = UIImpactFeedbackGenerator(style: .medium)
+        mediumFeedback?.prepare()
+        
+        heavyFeedback = UIImpactFeedbackGenerator(style: .heavy)
+        heavyFeedback?.prepare()
+        
+        rigidFeedback = UIImpactFeedbackGenerator(style: .rigid)
+        rigidFeedback?.prepare()
+        
+        softFeedback = UIImpactFeedbackGenerator(style: .soft)
+        softFeedback?.prepare()
+    }
+    
     func update(completion: FiatMethodHandler? = nil) {
-        Network(apiFetcher: APIFetcher()).getFiatMethods { result in
-            switch result {
-            case .success(let data):
-                withAnimation {
-                    self.resp = data
+        DispatchQueue.main.async {
+            Network(apiFetcher: APIFetcher()).getFiatMethods { result in
+                switch result {
+                case .success(let data):
+                    withAnimation {
+                        self.resp = data
+                    }
+                    
+                    // TODO: update default params
+                    if let countries = data.data?.layoutByCountry {
+                        self.countries = countries
+                        self.country = self.countries.first?.countryCode ?? "?"
+                    }
+                    
+                    self.updateMerchants()
+                    
+                case .failure(let error):
+                    self.error = error.localizedDescription
                 }
                 
-                // TODO: update default params
-                if let countries = data.data?.layoutByCountry {
-                    self.countries = countries
-                    self.country = self.countries.first?.countryCode ?? "?"
-                }
-                
-                self.updateMerchants()
-                
-            case .failure(let error):
-                self.error = error.localizedDescription
+                completion?(result)
             }
-            
-            completion?(result)
         }
     }
     
@@ -138,14 +180,17 @@ class BuySellVM: ObservableObject {
 }
 
 struct BuySell: View {
-    @StateObject var vm: BuySellVM = BuySellVM()
+    @StateObject var vm: BuySellVM
+    init(vm: BuySellVM = BuySellVM()) {
+        _vm = StateObject(wrappedValue: vm)
+    }
     
     @State var showCountry = false
     
     @ViewBuilder
     func textField() -> some View {
         HStack(alignment: .center, spacing: 4) {
-            DynamicFontSizeTextField(text: $vm.amount, maxLength: 15)
+            DynamicSizeInputField(text: $vm.amount, maxLength: vm.maxInputLength)
                 .fixedSize(horizontal: true, vertical: false)
                 .keyboardType(.decimalPad)
                 .foregroundColor(vm.mainLabel)
@@ -171,6 +216,7 @@ struct BuySell: View {
     func buildBuySellHeader() -> some View {
         HStack(alignment: .center, spacing: 8) {
             Button {
+                vm.mediumFeedback?.impactOccurred()
                 vm.isBuy = true
                 vm.updateMerchants()
             } label: {
@@ -193,6 +239,7 @@ struct BuySell: View {
             .foregroundColor(vm.isBuy ? .primary : .secondary)
             
             Button {
+                vm.mediumFeedback?.impactOccurred()
                 vm.isBuy = false
                 // vm.updateMerchants()
             } label: {
@@ -222,52 +269,72 @@ struct BuySell: View {
             buildBuySellHeader()
         } left: {
             Text(vm.country)
-                .font(.body)
-                .padding()
+                .font(.caption.bold())
+                .padding(8)
+                .background(vm.layer2)
+                .clipShape(Capsule())
                 .onTapGesture {
+                    vm.mediumFeedback?.impactOccurred()
                     showCountry = true
                 }
         } right: {
             vm.layer2
                 .frame(width: 32, height: 32)
                 .clipShape(Circle())
+                .onTapGesture {
+                    vm.mediumFeedback?.impactOccurred()
+                    vm.didTapDismiss?()
+                }
         }
         .frame(height: 50)
     }
     
     @ViewBuilder
     func buildLoading() -> some View {
-        Group {
+        VStack {
             Spacer()
             Text("Loading ..")
+                .frame(maxWidth: .infinity, alignment: .center)
+            Spacer()
         }
     }
     
     @ViewBuilder
+    func buildBuySellValue() -> some View {
+        Group {
+            if let buysellAmount = Double(vm.amount.prefix(vm.maxInputLength)) {
+                Text("\((buysellAmount*vm.rate).trimmedString) \(vm.currency.uppercased())")
+            } else {
+                Text("0 \(vm.currency.uppercased())")
+            }
+        }
+        .padding(8)
+        .font(.caption)
+        .foregroundColor(vm.secondaryLabel)
+        .overlay(
+            Capsule()
+                .stroke(vm.secondaryLabel, lineWidth: 1)
+        )
+    }
+    
+    @ViewBuilder
     func buildAmountInput() -> some View {
-        VStack(alignment: .center, spacing: 14) {
+        VStack(alignment: .center, spacing: 16) {
             textField()
+                .padding(.top, 12)
             
             VStack(alignment: .center, spacing: 12) {
-                Text("6000.01 USD")
-                    .padding(8)
-                    .font(.caption)
-                    .foregroundColor(vm.secondaryLabel)
-                    .overlay(
-                        Capsule()
-                            .stroke(vm.secondaryLabel, lineWidth: 1)
-                    )
+                buildBuySellValue()
                 
-                Text("Min. amount: 50 TON")
+                Text("Min. amount: \(vm.minAmount.trimmedString) \(vm.asset)")
                     .font(.caption)
                     .foregroundColor(vm.secondaryLabel)
             }
         }
-        .padding(.vertical, 16)
+        .padding(.vertical, 20)
         .frame(maxWidth: .infinity)
         .background(vm.layer2)
         .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
-        .frame(height: 160)
     }
     
     @ViewBuilder
@@ -275,6 +342,7 @@ struct BuySell: View {
         VStack(spacing: 0) {
             ForEach(PayMethod.allCases, id: \.rawValue) { method in
                 Button {
+                    vm.mediumFeedback?.impactOccurred()
                     vm.method = method.rawValue
                 } label: {
                     HStack {
@@ -302,7 +370,8 @@ struct BuySell: View {
     
     @ViewBuilder
     func buildContinueButton() -> some View {
-        if vm.resp.data != nil {
+        if let buySellAmount = Double(vm.amount),
+           buySellAmount > 0 && vm.resp.data != nil && buySellAmount >= vm.minAmount {
             NavigationLink {
                 BuySellMerchant()
                     .environmentObject(vm)
@@ -315,6 +384,17 @@ struct BuySell: View {
                     .background(vm.main)
                     .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
             }
+            .gesture(TapGesture().onEnded({ _ in
+                vm.mediumFeedback?.impactOccurred()
+            }))
+        } else {
+            Text("Continue")
+                .font(.headline.bold())
+                .frame(maxWidth: .infinity)
+                .padding()
+                .foregroundColor(vm.secondaryLabel)
+                .background(vm.main.opacity(0.7))
+                .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
         }
     }
     
@@ -322,26 +402,31 @@ struct BuySell: View {
         ZStack {
             vm.layer1.ignoresSafeArea()
             
-            VStack {
-                buildHeader()
-                
+            VStack(alignment: .leading, spacing: 16) {
                 if vm.resp.data == nil {
                     buildLoading()
                 } else {
+                    buildHeader()
                     ScrollView {
                         buildAmountInput()
                         buildPaymentOptions()
                     }
+                    
+                    Spacer()
+                    buildContinueButton()
                 }
-                
-                Spacer()
-                buildContinueButton()
             }
+            
             .onAppear {
                 if vm.resp.data == nil {
                     vm.update()
                 }
+                
+                if vm.mediumFeedback == nil {
+                    vm.initHaptic()
+                }
             }
+            
             .padding()
             .navigationBarBackButtonHidden(true)
             
@@ -365,112 +450,182 @@ struct BuySellMerchant: View {
     @State var showCountry: Bool = false
     @State var showAmount: Bool = false
     
-    var body: some View {
-        VStack {
-            HeaderView {
-                VStack {
-                    Text("Operator")
-                        .font(.title3.bold())
-                        .foregroundColor(Color.white)
-                    Text(vm.method)
-                        .font(.body)
-                        .foregroundColor(Color(hex: "#8B94A2"))
-                }
-            } left: {
-                Button {
+    @ViewBuilder
+    func buildHeader() -> some View {
+        HeaderView {
+            VStack {
+                Text("Operator")
+                    .font(.title3.bold())
+                    .foregroundColor(vm.mainLabel)
+                Text(vm.method)
+                    .font(.body)
+                    .foregroundColor(vm.secondaryLabel)
+            }
+        } left: {
+            vm.layer2
+                .frame(width: 32, height: 32)
+                .clipShape(Circle())
+                .onTapGesture {
                     self.presentation.wrappedValue.dismiss()
-                } label: {
-                    Text("b")
                 }
-            } right: {
-                Button {} label: {
-                    Text("x")
-                }
-            }
-            .frame(height: 50)
-
-            Button {
-                vm.merchant = ""
-                showCountry = true
-            } label: {
-                HStack {
-                    Text(vm.country)
-                    if let info = BuySellVM.countriesInfo[vm.country] {
-                        Text(info)
-                            .font(.body)
-                            .foregroundColor(Color.secondary)
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.up.chevron.down")
-                }
-            }
-            .buttonStyle(BigButtonStyle(backgroundColor: .secondary.opacity(0.4), textColor: .white))
+        } right: {
+            vm.layer2
+                .frame(width: 32, height: 32)
+                .clipShape(Circle())
+        }
+        .frame(height: 50)
+    }
+    
+    @ViewBuilder
+    func buildCountrySelection() -> some View {
+        HStack {
+            Text(vm.country)
+                .font(.body.bold())
+                .foregroundColor(vm.mainLabel)
             
-            if let currency = vm.countries.first(where: { $0.countryCode == vm.country })?.currency,
-                let methods = vm.countries.first(where: { $0.countryCode == vm.country })?.methods,
-//               let
-                !methods.isEmpty {
-                ScrollView {
-                    VStack(spacing: 0) {
-                        ForEach(methods) { method in
-                            Button {
-                                vm.merchant = method
-                            } label: {
-                                HStack {
-                                    if let merchant = vm.merchants.first(where: { $0.title?.uppercased() == method.uppercased() }),
-                                       let iconURL = URL(string: merchant.iconURL ?? "") {
-                                        Image(systemName: "questionmark.square.fill")
-                                            .data(url: iconURL)
-                                            .frame(width: 52, height: 52)
-                                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                                    } else {
-                                        Image(systemName: "questionmark.square.fill")
-                                            .resizable()
-                                            .frame(width: 52, height: 52)
-                                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                                            .foregroundColor(Color.primary)
-                                    }
-                                    
-                                    VStack(alignment: .leading, spacing: 10) {
-                                        Text(method.capitalized)
-                                        Text("? \(currency.uppercased()) for 1 \(vm.asset.uppercased())")
-                                    }
-                                    
-                                    Spacer()
-                                    
-                                    vm.merchant == method ?
-//                                        Image("ic.radio.selected") : Image("ic.radio.unselect")
-                                        Text("x") : Text("")
+            if let info = BuySellVM.countriesInfo[vm.country] {
+                Text(info)
+                    .font(.body)
+                    .foregroundColor(vm.secondaryLabel)
+            }
+            Spacer()
+            Image(systemName: "chevron.up.chevron.down")
+                .foregroundColor(vm.secondaryLabel)
+        }
+        
+        .padding()
+        .background(vm.layer2)
+        .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
+        
+        .contentShape(Rectangle())
+        .onTapGesture {
+            vm.mediumFeedback?.impactOccurred()
+            vm.merchant = ""
+            showCountry = true
+        }
+    }
+    
+    @ViewBuilder
+    func buildProviderSelection(methods: [String], currency: String) -> some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                ForEach(methods.sorted(by: >)) { method in
+                    HStack(alignment: .center, spacing: 16) {
+                        if let merchant = vm.merchants.first(where: { $0.title?.uppercased() == method.uppercased() }),
+                           let iconURL = URL(string: merchant.iconURL ?? "") {
+                            Image(systemName: "questionmark.square.fill")
+                                .data(url: iconURL)
+                                .frame(width: 52, height: 52)
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        } else {
+                            Image(systemName: "questionmark.square.fill")
+                                .resizable()
+                                .frame(width: 52, height: 52)
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .foregroundColor(Color.primary)
+                        }
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(alignment: .center, spacing: 6) {
+                                Text(method.capitalized)
+                                    .font(.body.bold())
+                                    .foregroundColor(vm.mainLabel)
+                                
+                                if method.lowercased() == "mercuryo" {
+                                    Text("BEST")
+                                        .padding(4)
+                                        .font(.caption.bold())
+                                        .foregroundColor(vm.tagTint)
+                                        .background(vm.tagBackground)
+                                        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
                                 }
                             }
-                            .padding(.vertical, 14)
-                            .padding(.horizontal, 12)
+                            
+                            Text("? \(currency.uppercased()) for 1 \(vm.asset.uppercased())")
+                                .font(.callout)
+                                .foregroundColor(vm.secondaryLabel)
                         }
+                        
+                        Spacer()
+                        
+                        vm.merchant == method ?
+//                                        Image("ic.radio.selected") : Image("ic.radio.unselect")
+                            Text("x") : Text("")
                     }
-                    .background(Color.secondary.opacity(0.2))
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    
+                    .padding()
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        vm.mediumFeedback?.impactOccurred()
+                        vm.merchant = method
+                    }
+                    
+                    Divider()
+                        .padding(.leading, 16)
                 }
-            } else {
-                Spacer()
-                Text("select another country =]")
             }
-            
-            Spacer()
-            
-            NavigationLink(isActive: $showAmount) {
-                BuySellAmount()
-                    .environmentObject(vm)
-            } label: {
-                Text("Continue")
-            }
-            .buttonStyle(BigButtonStyle(backgroundColor: .blue, textColor: .white))
+            .background(vm.layer2)
+            .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
         }
-        .padding([.top, .horizontal])
-        .navigationBarBackButtonHidden(true)
-        
-        .sheet(isPresented: $showCountry) {
-            BuySellCurrency()
+    }
+    
+    @ViewBuilder
+    func buildContinueButton() -> some View {
+        NavigationLink {
+            BuySellAmount()
                 .environmentObject(vm)
+        } label: {
+            Text("Continue")
+                .font(.headline.bold())
+                .frame(maxWidth: .infinity)
+                .padding()
+                .foregroundColor(vm.mainLabel)
+                .background(vm.main)
+                .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
+        }
+        .gesture(TapGesture().onEnded({ _ in
+            vm.mediumFeedback?.impactOccurred()
+        }))
+    }
+    
+    var body: some View {
+        ZStack {
+            vm.layer1.ignoresSafeArea()
+            
+            VStack(alignment: .leading, spacing: 16) {
+                buildHeader()
+                buildCountrySelection()
+                
+                if let currency = vm.countries.first(where: { $0.countryCode == vm.country })?.currency,
+                    let methods = vm.countries.first(where: { $0.countryCode == vm.country })?.methods, !methods.isEmpty {
+                    buildProviderSelection(methods: methods, currency: currency)
+                } else {
+                    Spacer()
+                    Text("we're working to supprt many country 😉")
+                        .font(.body.bold())
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .foregroundColor(vm.mainLabel)
+                }
+                
+                Spacer()
+                
+                if vm.resp.data != nil && !vm.merchant.isEmpty {
+                    buildContinueButton()
+                } else {
+                    Text("Please select a merchant ☕️")
+                        .font(.body.bold())
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .foregroundColor(vm.mainLabel)
+                }
+            }
+            
+            .padding([.top, .horizontal])
+            .navigationBarBackButtonHidden(true)
+            
+            .sheet(isPresented: $showCountry) {
+                BuySellCurrency()
+                    .environmentObject(vm)
+            }
         }
     }
 }
@@ -492,6 +647,7 @@ struct BuySellCurrency: View {
                 .frame(width: 32, height: 32)
                 .clipShape(Circle())
                 .onTapGesture {
+                    vm.mediumFeedback?.impactOccurred()
                     presentation.wrappedValue.dismiss()
                 }
         }
@@ -526,6 +682,7 @@ struct BuySellCurrency: View {
                     
                     .contentShape(Rectangle())
                     .onTapGesture {
+                        vm.mediumFeedback?.impactOccurred()
                         vm.country = country.countryCode ?? ""
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: {
                             presentation.wrappedValue.dismiss()
@@ -539,13 +696,15 @@ struct BuySellCurrency: View {
     }
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 16) {
             buildHeader()
             
             if !vm.countries.isEmpty {
                 ScrollView {
                     buildCountryList()
                 }
+            } else {
+                Spacer()
             }
         }
         .padding()
@@ -612,118 +771,171 @@ struct BuySellAmount: View {
     @State var getAmount: Double = 0
     @State var status: TransactionStatus = .initialize
     
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HeaderView {
-                EmptyView()
-            } left: {
-                Button {
+    @ViewBuilder
+    func buildHeader() -> some View {
+        HeaderView {
+            EmptyView()
+        } left: {
+            vm.layer2
+                .frame(width: 32, height: 32)
+                .clipShape(Circle())
+                .onTapGesture {
+                    vm.mediumFeedback?.impactOccurred()
                     presentation.wrappedValue.dismiss()
-                } label: {
-                    Text("b")
                 }
-            } right: {
-                Button {} label: {
-                    Text("x")
-                }
-            }
-            .frame(height: 50)
-            
-            if let merchant = vm.merchants.first(where: { $0.title?.uppercased() == vm.merchant.uppercased() }) {
-                VStack(alignment: .center, spacing: 16) {
-                    Image(systemName: "")
-                        .data(url: URL(string: merchant.iconURL!)!)
-                        .frame(width: 72, height: 72)
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    Text(merchant.title?.capitalized ?? "-")
-                    Text(merchant.subtitle?.capitalized ?? "-")
-                }
-                .frame(maxWidth: .infinity)
-            } else {
-                VStack(alignment: .center, spacing: 16) {
-                    Image(systemName: "questionmark.square.fill")
-                        .resizable()
-                        .frame(width: 72, height: 72)
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    
-                    Text("Please select a merchant")
-                }
-                .frame(maxWidth: .infinity)
-            }
-            
-            if vm.isBuy {
-                VStack(alignment: .leading, spacing: 16) {
-                    if let currency = vm.countries.first(where: { $0.countryCode?.uppercased() == vm.country.uppercased() })?.currency?.uppercased() {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("You pay")
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .foregroundColor(Color(UIColor.secondaryLabel))
-                            
-                            textField(isFocus: $isFocus, asset: currency)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .fill(Color(UIColor.secondarySystemBackground))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .stroke(isFocus ? Color.blue : Color.clear, lineWidth: 2)
-                        )
-                    }
-                    
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("You get")
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .foregroundColor(Color(UIColor.secondaryLabel))
-                        
-//                        textField(amount: $getAmount, isFocus: .constant(false), asset: vm.asset)
-                        Text("0.000")
-                            .disabled(true)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(Color(UIColor.secondarySystemBackground))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .stroke(isFocus ? Color.blue : Color.clear, lineWidth: 2)
-                    )
-                }
-            } else {
-                Text("Fixing")
-            }
-            
-            Spacer()
-            
-            if case .initialize = status {
-                Text("Continue")
-                    .font(.body.bold())
-                    .padding()
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .onTapGesture {
-                        status = .processing
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: {
-                            status = [.success, .failed].randomElement()!
-                        })
-                    }
-                    .background(Color.blue)
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            } else {
-                status.getView()
-                    .background(status.getColor())
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            }
+        } right: {
+            vm.layer2
+                .frame(width: 32, height: 32)
+                .clipShape(Circle())
         }
-        .padding([.top, .horizontal])
-        .navigationBarBackButtonHidden(true)
-        
-        .contentShape(Rectangle())
-        .onTapGesture {
-            hideKeyboard()
+        .frame(height: 50)
+    }
+    
+    @ViewBuilder
+    func buildMerchantPreview() -> some View {
+        if let merchant = vm.merchants.first(where: { $0.title?.uppercased() == vm.merchant.uppercased() }) {
+            VStack(alignment: .center, spacing: 16) {
+                Image(systemName: "")
+                    .data(url: URL(string: merchant.iconURL!)!)
+                    .frame(width: 72, height: 72)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                
+                Text(merchant.title?.capitalized ?? "-")
+                    .font(.title2.bold())
+                    .foregroundColor(vm.mainLabel)
+                
+                Text(merchant.subtitle?.capitalized ?? "-")
+                    .font(.body)
+                    .foregroundColor(vm.secondaryLabel)
+            }
+            .frame(maxWidth: .infinity)
+        } else {
+            VStack(alignment: .center, spacing: 16) {
+                Image(systemName: "questionmark.square.fill")
+                    .resizable()
+                    .frame(width: 72, height: 72)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                
+                Text("Please select a merchant")
+                    .font(.body.bold())
+                    .foregroundColor(vm.mainLabel)
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+    
+    @ViewBuilder
+    func buildBuySellPreview() -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+//            if let currency = vm.countries.first(where: { $0.countryCode?.uppercased() == vm.country.uppercased() })?.currency?.uppercased() {
+//                VStack(alignment: .leading, spacing: 6) {
+//                    Text("You pay" )
+//                        .frame(maxWidth: .infinity, alignment: .leading)
+//                        .foregroundColor(Color(UIColor.secondaryLabel))
+//                    
+//                    textField(isFocus: $isFocus, asset: currency)
+//                }
+//                .frame(maxWidth: .infinity)
+//                .padding()
+//                .background(
+//                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+//                        .fill(Color(UIColor.secondarySystemBackground))
+//                )
+//                .overlay(
+//                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+//                        .stroke(isFocus ? Color.blue : Color.clear, lineWidth: 2)
+//                )
+//            }
+            
+            VStack(alignment: .leading, spacing: 6) {
+                Text("You pay")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .foregroundColor(vm.secondaryLabel)
+                
+                textField(isFocus: $isFocus, asset: vm.currency)
+            }
+            .frame(maxWidth: .infinity)
+            .padding()
+            .background(
+                RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous)
+                    .fill(vm.layer2)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(isFocus ? Color.blue : Color.clear, lineWidth: 2)
+            )
+            
+            VStack(alignment: .leading, spacing: 6) {
+                Text("You get")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .foregroundColor(vm.secondaryLabel)
+                
+                HStack(alignment: .center, spacing: 4) {
+                    Text("0.000")
+                        .foregroundColor(vm.mainLabel)
+                    Text("TON")
+                        .foregroundColor(vm.secondaryLabel)
+                }
+            }
+            .padding()
+            .background(
+                RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous)
+                    .fill(vm.layer2)
+            )
+            
+            Text("2,3301.01 AMD for 1 TON")
+                .padding(.leading, 12)
+                .foregroundColor(vm.secondaryLabel)
+        }
+    }
+    
+    @ViewBuilder
+    func buildStatusButton() -> some View {
+        if case .initialize = status {
+            Text("Continue")
+                .font(.body.bold())
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .center)
+                .onTapGesture {
+                    vm.mediumFeedback?.impactOccurred()
+                    status = .processing
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: {
+                        status = [.success, .failed].randomElement()!
+                    })
+                }
+                .background(Color.blue)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        } else {
+            status.getView()
+                .background(status.getColor())
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+    }
+    
+    var body: some View {
+        ZStack {
+            vm.layer1.ignoresSafeArea()
+            
+            VStack(alignment: .leading, spacing: 16) {
+                buildHeader()
+                buildMerchantPreview()
+                buildBuySellPreview()
+                
+                Spacer()
+            }
+            .padding([.top, .horizontal])
+            .navigationBarBackButtonHidden(true)
+            
+            .contentShape(Rectangle())
+            .onTapGesture {
+                hideKeyboard()
+            }
+            
+            VStack {
+                Spacer()
+                buildStatusButton()
+            }
+            .padding()
         }
     }
     
@@ -733,47 +945,23 @@ struct BuySellAmount: View {
             TextField("", text: $vm.amount, onEditingChanged: { edit in
                 isFocus.wrappedValue = edit
             })
+            .foregroundColor(vm.mainLabel)
             .keyboardType(.decimalPad)
             .fixedSize(horizontal: true, vertical: false)
-            .font(.system(size: 20, weight: .regular, design: .rounded))
             .multilineTextAlignment(.center)
             
-            Button {} label: {
-                Text(asset.uppercased())
-                    .font(.system(size: 20, weight: .regular, design: .default))
-            }
-            .foregroundColor(Color(UIColor.secondaryLabel))
+            Text(asset.uppercased())
+                .foregroundColor(vm.secondaryLabel)
         }
-    }
-}
-
-struct Demo: View {
-    @State private var temp = "0"
-
-    var body: some View {
-        VStack {
-            DynamicFontSizeTextField(text: $temp, maxLength: 15)
-                .padding()
-                .background(Color.gray.opacity(0.5))
-                .cornerRadius(8)
-                .border(.red, width: 1)
-
-            Text("You entered: \(temp)")
-                .font(.headline)
-                .padding()
-        }
-        .padding()
     }
 }
 
 #Preview {
     NavigationView {
-//        Demo()
+//        BuySell()
         
-        BuySell()
-        
-//        BuySellAmount()
-//            .environmentObject(BuySellVM())
+        BuySellAmount()
+            .environmentObject(BuySellVM())
         
 //        BuySellMerchant()
 //            .environmentObject(BuySellVM())

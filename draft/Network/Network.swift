@@ -35,6 +35,19 @@ extension NetworkRequest {
         
         return request
     }
+    
+    func asURLRequestWithBody(with queries: [URLQueryItem]? = nil, body: Data? = nil) -> URLRequest? {
+        guard let url = self.asURL(with: queries) else { return nil }
+        var request = URLRequest(url: url)
+        request.httpMethod = Self.method.rawValue
+        
+        if Self.method == .POST {
+            request.httpBody = body
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
+        
+        return request
+    }
 }
 
 class Network {

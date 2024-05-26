@@ -23,8 +23,23 @@ enum SwapStatus {
     case success
 }
 
-@MainActor final
+typealias SwapMethodHandler = (Result<RPCResponse<SwapMethod>, HTTPError>) -> Void
+typealias SwapSimulateHandler = (Result<RPCResponse<SwapSimulate>, HTTPError>) -> Void
+
+final
 class SwapVM: ObservableObject {
+    var didTapDismiss: EmptyHandler?
+    
+    // api
+    @Published var resp: SwapMethod?
+    @Published var simutale: SwapSimulate?
+    
+    @Published var swapableAsset: [SwapAsset] = []
+    var suggestedTokens: [String] = [
+        "ton",
+        "not",
+    ]
+    
     @Published var status: SwapStatus = .enterAmount
     
     @Published var wallet: [String: Asset] = [
@@ -43,24 +58,10 @@ class SwapVM: ObservableObject {
     @Published var detail: SwapDetail?
     @Published var swapRate: String?
     
-    // data
-    @Published var suggestedTokens: [String] = [
-        "usdt",
-        "anon",
-    ]
-    
-    @Published var otherTokens: [String] = [
-        "ton",
-        "usdt",
-        "glint",
-        "utya",
-        "poveldurev"
-    ]
-    
     // searching
     @Published var isSearching: Bool = false // smooth transition
     @Published var searchQuery: String = ""
-    @Published var searchResult: [String] = []
+    @Published var searchResult: [SwapAsset] = []
     
     // setting
     @Published var slippage: Double = 1
@@ -69,7 +70,9 @@ class SwapVM: ObservableObject {
     
     var cancellables = Set<AnyCancellable>()
     
-    init() {
+    init(didTapDismiss: EmptyHandler? = nil) {
+        self.didTapDismiss = didTapDismiss
+     
         Publishers.CombineLatest3($sendToken, $sendAmount, $receiveToken)
             .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
             .sink { [weak self] _ in
@@ -93,11 +96,97 @@ class SwapVM: ObservableObject {
     let secondaryLabel: Color = Color.secondary
     let cornerRadius: CGFloat = 14
     
+    // haptic
     var lightFeedback: UIImpactFeedbackGenerator?
     var mediumFeedback: UIImpactFeedbackGenerator?
     var heavyFeedback: UIImpactFeedbackGenerator?
     var rigidFeedback: UIImpactFeedbackGenerator?
     var softFeedback: UIImpactFeedbackGenerator?
+    
+    func update(completion: SwapMethodHandler? = nil) {
+        let jsonString = """
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "asset.list",
+            "params": {
+                "load_community": false
+            }
+        }
+        """
+
+        guard let jsonData = jsonString.data(using: .utf8) else {
+            print("Failed to convert JSON string to Data")
+            completion?(.failure(.invalidData))
+            return
+        }
+        
+        Network(apiFetcher: APIFetcher()).getSwapMethods(body: jsonData) { result in
+            DispatchQueue.main.async {
+                completion?(result)
+            }
+        }
+    }
+    
+    func simulateSwap(
+        offerAddress: String, askAddress: String,
+        offerUnits: String, slippage: String,
+        completion: SwapSimulateHandler? = nil
+    ) {
+        let jsonString = """
+        {
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "dex.simulate_swap",
+            "params": {
+                "offer_address": "\(offerAddress)",
+                "offer_units": "\(offerUnits)",
+                "ask_address": "\(askAddress)",
+                "slippage_tolerance": "\(slippage)",
+                "referral_address": "EQBsju9UnwA_T0IdAJrt5Qfj91NWZ7Y56Y_Qm1XI_A4jyzHr"
+            }
+        }
+        """
+        
+        guard let jsonData = jsonString.data(using: .utf8) else {
+            print("Failed to convert JSON string to Data")
+            completion?(.failure(.invalidData))
+            return
+        }
+        
+        Network(apiFetcher: APIFetcher()).getSwapSimulate(body: jsonData) { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let data):
+                    if let simulate = data.result {
+                        self.simutale = simulate
+                    }
+                    
+                case .failure(let error):
+                    print(error.localizedDescription)
+                }
+                
+                completion?(result)
+            }
+        }
+    }
+    
+    func initHaptic() {
+        lightFeedback = UIImpactFeedbackGenerator(style: .light)
+        lightFeedback?.prepare()
+        
+        mediumFeedback = UIImpactFeedbackGenerator(style: .medium)
+        mediumFeedback?.prepare()
+        
+        heavyFeedback = UIImpactFeedbackGenerator(style: .heavy)
+        heavyFeedback?.prepare()
+        
+        rigidFeedback = UIImpactFeedbackGenerator(style: .rigid)
+        rigidFeedback?.prepare()
+        
+        softFeedback = UIImpactFeedbackGenerator(style: .soft)
+        softFeedback?.prepare()
+    }
     
     func updateState() {
         guard shouldCommitChange else { return }
@@ -149,28 +238,10 @@ class SwapVM: ObservableObject {
             self.isSearching = !self.searchQuery.isEmpty
         }
         
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
-            withAnimation {
-                self.searchResult = [["TON"], ["ANON"], []].randomElement()!
-            }
+        self.searchResult = self.swapableAsset.filter({ item in
+            (item.symbol?.lowercased() ?? "").contains(self.searchQuery.lowercased()) ||
+            (item.displayName?.lowercased() ?? "").contains(self.searchQuery.lowercased())
         })
-    }
-    
-    func initHaptic() {
-        lightFeedback = UIImpactFeedbackGenerator(style: .light)
-        lightFeedback?.prepare()
-        
-        mediumFeedback = UIImpactFeedbackGenerator(style: .medium)
-        mediumFeedback?.prepare()
-        
-        heavyFeedback = UIImpactFeedbackGenerator(style: .heavy)
-        heavyFeedback?.prepare()
-        
-        rigidFeedback = UIImpactFeedbackGenerator(style: .rigid)
-        rigidFeedback?.prepare()
-        
-        softFeedback = UIImpactFeedbackGenerator(style: .soft)
-        softFeedback?.prepare()
     }
 }
 
@@ -198,8 +269,33 @@ struct Swap: View {
             vm.layer2
                 .frame(width: 32, height: 32)
                 .clipShape(Circle())
+                .onTapGesture {
+                    vm.didTapDismiss?()
+                }
         }
         .frame(height: 50)
+    }
+    
+    @ViewBuilder
+    func buildTokenIcon(width: CGFloat, urlString: String?) -> some View {
+        if let url = URL(string: urlString ?? "") {
+            KFImage(url)
+                .placeholder({
+                    Image(systemName: "questionmark.circle.fill")
+                        .resizable()
+                        .frame(width: width, height: width, alignment: .center)
+                        .clipShape(Circle())
+                })
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: width, height: width, alignment: .center)
+                .clipShape(Circle())
+        } else {
+            Image(systemName: "questionmark.circle.fill")
+                .resizable()
+                .frame(width: width, height: width, alignment: .center)
+                .clipShape(Circle())
+        }
     }
     
     @ViewBuilder
@@ -225,7 +321,7 @@ struct Swap: View {
             }
             
             HStack(alignment: .center) {
-                buildTokenButton(asset: $vm.sendToken)
+                buildTokenButton(token: $vm.sendToken)
                 Spacer()
                 TextField("0", text: $vm.sendAmount)
                     .fixedSize(horizontal: true, vertical: false)
@@ -251,7 +347,7 @@ struct Swap: View {
             }
             
             HStack(alignment: .center) {
-                buildTokenButton(asset: $vm.receiveToken)
+                buildTokenButton(token: $vm.receiveToken)
                 Spacer()
                 Text(String(vm.receiveAmount))
                     .font(.title.bold())
@@ -331,12 +427,12 @@ struct Swap: View {
     }
     
     @ViewBuilder
-    func buildTokenButton(asset: Binding<String>) -> some View {
+    func buildTokenButton(token: Binding<String>) -> some View {
         NavigationLink {
-            SwapToken(asset: asset)
+            SwapToken(token: token)
                 .environmentObject(vm)
         } label: {
-            if asset.wrappedValue.isEmpty {
+            if token.wrappedValue.isEmpty {
                 Text("Choose".uppercased())
                     .font(.body.bold())
                     .foregroundColor(vm.mainLabel)
@@ -345,9 +441,13 @@ struct Swap: View {
                     .clipShape(Capsule())
             } else {
                 HStack(alignment: .center, spacing: 4) {
-                    Color.primary.frame(width: 24, height: 24)
-                        .clipShape(Capsule())
-                    Text(asset.wrappedValue.uppercased())
+                    buildTokenIcon(
+                        width: 24,
+                        urlString: vm.swapableAsset.first(where: {
+                            $0.symbol?.uppercased() == token.wrappedValue.uppercased()
+                        })?.imageURL
+                    )
+                    Text(token.wrappedValue.uppercased())
                         .font(.body.bold())
                         .foregroundColor(vm.mainLabel)
                 }
@@ -420,16 +520,35 @@ struct Swap: View {
                 if vm.mediumFeedback == nil {
                     vm.initHaptic()
                 }
+                
+                if vm.resp == nil {
+                    vm.update { result in
+                        print(result)
+                        
+                        switch result {
+                        case .success(let data):
+                            if let method = data.result {
+                                vm.resp = method
+                                vm.swapableAsset = method.assets ?? []
+                            }
+                            
+                        case .failure(let error):
+                            print(error.localizedDescription)
+                        }
+                    }
+                }
             }
         }
     }
 }
 
+import Kingfisher
+
 struct SwapToken: View {
     @Environment(\.presentationMode) var presentation
     
     @EnvironmentObject var vm: SwapVM
-    @Binding var asset: String
+    @Binding var token: String
     
     @ViewBuilder
     func buildHeader() -> some View {
@@ -469,10 +588,12 @@ struct SwapToken: View {
             
             FlowLayout(vm.suggestedTokens, spacing: 4) { tag in
                 HStack(alignment: .center, spacing: 4) {
-                    vm.layer3
-                        .frame(width: 28, height: 28, alignment: .center)
-                        .clipShape(Circle())
-                    Text(tag)
+                    buildTokenIcon(
+                        width: 28, urlString: vm.swapableAsset.first(where: {
+                            $0.symbol?.uppercased() ?? "" == tag.uppercased()
+                        })?.imageURL
+                    )
+                    Text(tag.uppercased())
                 }
                 .foregroundColor(vm.mainLabel)
                 .padding(6)
@@ -480,12 +601,34 @@ struct SwapToken: View {
                 .clipShape(Capsule(style: .continuous))
                 .onTapGesture {
                     vm.mediumFeedback?.impactOccurred()
-                    asset = tag.uppercased()
+                    token = tag.uppercased()
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: {
                         presentation.wrappedValue.dismiss()
                     })
                 }
             }
+        }
+    }
+    
+    @ViewBuilder
+    func buildTokenIcon(width: CGFloat, urlString: String?) -> some View {
+        if let url = URL(string: urlString ?? "") {
+            KFImage(url)
+                .placeholder({
+                    Image(systemName: "questionmark.circle.fill")
+                        .resizable()
+                        .frame(width: width, height: width, alignment: .center)
+                        .clipShape(Circle())
+                })
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: width, height: width, alignment: .center)
+                .clipShape(Circle())
+        } else {
+            Image(systemName: "questionmark.circle.fill")
+                .resizable()
+                .frame(width: width, height: width, alignment: .center)
+                .clipShape(Circle())
         }
     }
     
@@ -497,14 +640,13 @@ struct SwapToken: View {
             
             ScrollView {
                 VStack(spacing: 0) {
-                    ForEach(vm.otherTokens) { token in
+                    ForEach(vm.swapableAsset) { asset in
                         HStack(alignment: .center, spacing: 16) {
-                            vm.layer2.frame(width: 44, height: 44, alignment: .center)
-                                .clipShape(Circle())
+                            buildTokenIcon(width: 44, urlString: asset.imageURL)
                             
                             VStack(alignment: .center, spacing: 2) {
                                 HStack(alignment: .center) {
-                                    Text(token)
+                                    Text(asset.symbol ?? "?")
                                     Spacer()
                                     Text("100000")
                                 }
@@ -512,7 +654,7 @@ struct SwapToken: View {
                                 .foregroundColor(vm.mainLabel)
                                 
                                 HStack(alignment: .center) {
-                                    Text("toncoin")
+                                    Text(asset.displayName ?? "?")
                                     Spacer()
                                     Text("$600")
                                 }
@@ -525,11 +667,11 @@ struct SwapToken: View {
                         .frame(height: 76)
                         .contentShape(Rectangle())
                         .onTapGesture {
-                            vm.mediumFeedback?.impactOccurred()
-                            asset = token.uppercased()
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: {
-                                presentation.wrappedValue.dismiss()
-                            })
+//                            vm.mediumFeedback?.impactOccurred()
+//                            asset = token.uppercased()
+//                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: {
+//                                presentation.wrappedValue.dismiss()
+//                            })
                         }
                         
                         Divider()
@@ -542,6 +684,53 @@ struct SwapToken: View {
         }
     }
     
+    @ViewBuilder
+    func buildSearchResult() -> some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                ForEach(vm.searchResult) { asset in
+                    HStack(alignment: .center, spacing: 16) {
+                        buildTokenIcon(width: 44, urlString: asset.imageURL)
+                        
+                        VStack(alignment: .center, spacing: 2) {
+                            HStack(alignment: .center) {
+                                Text(asset.symbol ?? "?")
+                                Spacer()
+                                Text("100000")
+                            }
+                            .font(.body.bold())
+                            .foregroundColor(vm.mainLabel)
+                            
+                            HStack(alignment: .center) {
+                                Text(asset.displayName ?? "?")
+                                Spacer()
+                                Text("$600")
+                            }
+                            .font(.callout)
+                            .foregroundColor(vm.secondaryLabel)
+                        }
+                    }
+                    .padding()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(height: 76)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                            vm.mediumFeedback?.impactOccurred()
+                            token = (asset.symbol ?? "").uppercased()
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: {
+                                presentation.wrappedValue.dismiss()
+                            })
+                    }
+                    
+                    Divider()
+                        .padding(.leading, 16)
+                }
+            }
+            .background(vm.layer2)
+            .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
+        }
+    }
+    
     var body: some View {
         ZStack {
             vm.layer1.ignoresSafeArea()
@@ -551,17 +740,7 @@ struct SwapToken: View {
                 buildSearch()
                 
                 if vm.isSearching {
-                    Spacer()
-                    
-                    Group {
-                        if vm.searchResult.isEmpty {
-                            Text("probably nothing")
-                        } else {
-                            Text(vm.searchResult.description)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    
+                    buildSearchResult()
                     Spacer()
                 } else {
                     buildSuggestedToken()

@@ -7,11 +7,20 @@
 
 import SwiftUI
 
+typealias EmptyHandler = () -> Void
+
 final
 class StakeViewModel: ObservableObject {
+    var didTapDismiss: EmptyHandler?
+    let maxAmount: Double = 3.14159
     
-    @Published var asset: String = "TON"
-    @Published var amount: String = ""
+    @Published var stakeAmount: String = "0" // more convenience than double when process floating input
+    @Published var stakeAsset: String = "TON"
+    @Published var rate: Double = 6.1
+    @Published var currency: String = "USD"
+    
+    let maxInputLength: Int = 13
+    
     @Published var stakingDetail: [String: String] = [
         "Wallet": "😳 Main",
         "Recipient": "Tonstakers",
@@ -31,22 +40,49 @@ class StakeViewModel: ObservableObject {
         "TON Normonators",
     ]
     
+    init(didTapDismiss: EmptyHandler? = nil) {
+        self.didTapDismiss = didTapDismiss
+    }
+    
+    // theme
     let main: Color = Color.blue
     let layer1: Color = Color(UIColor.secondarySystemBackground)
     let layer2: Color = Color(UIColor.secondarySystemFill)
     let layer3: Color = Color(UIColor.secondaryLabel)
     let mainLabel: Color = Color.primary
     let secondaryLabel: Color = Color.secondary
-    
+    let alertLabel: Color = Color.red
     let cornerRadius: CGFloat = 10
     
-    func performStakeChange() {
+    // haptic
+    var lightFeedback: UIImpactFeedbackGenerator?
+    var mediumFeedback: UIImpactFeedbackGenerator?
+    var heavyFeedback: UIImpactFeedbackGenerator?
+    var rigidFeedback: UIImpactFeedbackGenerator?
+    var softFeedback: UIImpactFeedbackGenerator?
+    
+    func initHaptic() {
+        lightFeedback = UIImpactFeedbackGenerator(style: .light)
+        lightFeedback?.prepare()
         
+        mediumFeedback = UIImpactFeedbackGenerator(style: .medium)
+        mediumFeedback?.prepare()
+        
+        heavyFeedback = UIImpactFeedbackGenerator(style: .heavy)
+        heavyFeedback?.prepare()
+        
+        rigidFeedback = UIImpactFeedbackGenerator(style: .rigid)
+        rigidFeedback?.prepare()
+        
+        softFeedback = UIImpactFeedbackGenerator(style: .soft)
+        softFeedback?.prepare()
     }
 }
 
 struct Stake: View {
     @StateObject var vm: StakeViewModel = StakeViewModel()
+    
+    @State var availableAmount: Double = 0
     
     @ViewBuilder
     func buildHeader() -> some View {
@@ -61,7 +97,43 @@ struct Stake: View {
             vm.layer2
                 .frame(width: 32, height: 32)
                 .clipShape(Circle())
+                .onTapGesture {
+                    vm.didTapDismiss?()
+                }
         }
+        .frame(height: 50)
+    }
+    
+    @ViewBuilder
+    func buildAvailableAsset() -> some View {
+        if let stakeAmount = Double(vm.stakeAmount), vm.maxAmount - stakeAmount >= 0 {
+            let available = (vm.maxAmount - stakeAmount).trimmedString
+            Text("Available \(available) \(vm.stakeAsset)")
+                .font(.body)
+                .foregroundColor(vm.secondaryLabel)
+        } else {
+            Text("Insufficient balance")
+                .font(.body)
+                .foregroundColor(vm.alertLabel)
+        }
+    }
+    
+    @ViewBuilder
+    func buildStakeValue() -> some View {
+        Group {
+            if let stakeAmount = Double(vm.stakeAmount.prefix(vm.maxInputLength)) {
+                Text("\((stakeAmount*vm.rate).trimmedString) \(vm.currency.uppercased())")
+            } else {
+                Text("0 \(vm.currency.uppercased())")
+            }
+        }
+        .padding(8)
+        .font(.body)
+        .foregroundColor(vm.secondaryLabel)
+        .overlay(
+            Capsule()
+                .stroke(Color.secondary, lineWidth: 1)
+        )
     }
     
     @ViewBuilder
@@ -72,16 +144,7 @@ struct Stake: View {
                 textField()
                     .frame(height: 50)
                 
-                VStack(alignment: .center, spacing: 12) {
-                    Text("6000.01 USD")
-                        .padding(8)
-                        .font(.body)
-                        .foregroundColor(vm.secondaryLabel)
-                        .overlay(
-                            Capsule()
-                                .stroke(Color.secondary, lineWidth: 1)
-                        )
-                }
+                buildStakeValue()
             }
             .frame(height: 188)
             .padding()
@@ -95,19 +158,41 @@ struct Stake: View {
                     .padding(10)
                     .background(vm.layer2)
                     .clipShape(Capsule())
+                    .onTapGesture {
+                        vm.mediumFeedback?.impactOccurred()
+                        vm.stakeAmount = vm.maxAmount.description
+                    }
                 
                 Spacer()
-                
-//                Text("Insufficient balance")
-//                    .font(.body)
-//                    .foregroundColor(.red)
-                
-                Text("Available: 100,000.01 TON")
-                    .font(.body)
-                    .foregroundColor(vm.secondaryLabel)
+                buildAvailableAsset()
             }
         }
         .padding(.bottom, 16)
+    }
+    
+    @ViewBuilder
+    func textField() -> some View {
+        HStack(alignment: .center, spacing: 4) {
+            DynamicSizeInputField(text: $vm.stakeAmount, maxLength: vm.maxInputLength)
+                .fixedSize(horizontal: true, vertical: false)
+                .keyboardType(.decimalPad)
+                .foregroundColor(Color.white)
+                .multilineTextAlignment(.center)
+
+            Button {} label: {
+                Text(vm.stakeAsset)
+                    .font(.system(size: DynamicSizeInputField.dynamicSize(vm.stakeAmount.description), weight: .bold, design: .default))
+            }
+            .foregroundColor(Color.gray.opacity(0.8))
+            
+//            Picker("Token?", selection: $vm.asset) {
+//                ForEach(vm.assets, id: \.self) { key in
+//                    Text(key).tag(key)
+//                }
+//            }
+//            .pickerStyle(.menu)
+//            .border(.red, width: 1)
+        }
     }
     
     @ViewBuilder
@@ -155,27 +240,28 @@ struct Stake: View {
     }
     
     @ViewBuilder
-    func textField() -> some View {
-        HStack(alignment: .center, spacing: 4) {
-            DynamicFontSizeTextField(text: $vm.amount, maxLength: 15)
-                .fixedSize(horizontal: true, vertical: false)
-                .keyboardType(.decimalPad)
-                .foregroundColor(Color.white)
-                .multilineTextAlignment(.center)
-
-            Button {} label: {
-                Text(vm.asset)
-                    .font(.system(size: DynamicFontSizeTextField.dynamicSize(vm.amount), weight: .bold, design: .default))
+    func buildContinueButton() -> some View {
+        if let stakeAmount = Double(vm.stakeAmount), stakeAmount > 0 && vm.maxAmount - stakeAmount >= 0 {
+            NavigationLink {
+                StakeConfirm()
+                    .environmentObject(vm)
+            } label: {
+                Text("Continue")
+                    .font(.headline.bold())
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .foregroundColor(vm.mainLabel)
+                    .background(vm.main)
+                    .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
             }
-            .foregroundColor(Color.gray.opacity(0.8))
-            
-//            Picker("Token?", selection: $vm.asset) {
-//                ForEach(vm.assets, id: \.self) { key in
-//                    Text(key).tag(key)
-//                }
-//            }
-//            .pickerStyle(.menu)
-//            .border(.red, width: 1)
+        } else {
+            Text("Continue")
+                .font(.headline.bold())
+                .frame(maxWidth: .infinity)
+                .padding()
+                .foregroundColor(vm.secondaryLabel)
+                .background(vm.main.opacity(0.7))
+                .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
         }
     }
     
@@ -190,9 +276,16 @@ struct Stake: View {
                 
                 Spacer()
             }
-            .navigationBarBackButtonHidden(true)
             
-            .background(vm.layer1)
+            .onAppear {
+                availableAmount = vm.maxAmount
+                
+                if vm.mediumFeedback == nil {
+                    vm.initHaptic()
+                }
+            }
+            
+            .navigationBarBackButtonHidden(true)
             .padding()
             
             .contentShape(Rectangle())
@@ -202,20 +295,7 @@ struct Stake: View {
             
             VStack {
                 Spacer()
-                
-                NavigationLink {
-                    StakeConfirm()
-                        .environmentObject(vm)
-                } label: {
-                    Text("Continue")
-                        .font(.headline.bold())
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .foregroundColor(vm.mainLabel)
-                        .background(vm.main)
-                        .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
-                }
-
+                buildContinueButton()
             }
             .padding()
         }
@@ -817,5 +897,124 @@ struct StakeConfirm: View {
 #Preview {
     NavigationView {
         Stake()
+    }
+}
+
+//#Preview {
+//    Demo()
+//}
+
+extension String {
+    func process() -> String {
+        guard let systemSeparator = Locale.current.decimalSeparator else {
+            return "0"
+        }
+        
+        var chunks: [String] = self.components(separatedBy: systemSeparator)
+        
+        let integralPart: String = chunks.first ?? "0"
+        chunks.removeFirst()
+        let fractionalPart: String = chunks.joined(separator: "")
+        
+        if fractionalPart.isEmpty {
+            return integralPart
+        } else {
+            let result = "\(integralPart)\(systemSeparator)\(fractionalPart)"
+            return result
+        }
+    }
+}
+
+extension Double {
+    var trimmedString: String {
+        let formatter = NumberFormatter()
+        formatter.minimumFractionDigits = 0
+        formatter.maximumFractionDigits = 9
+        return formatter.string(for: self) ?? ""
+    }
+}
+
+struct Demo: View {
+    @State var amount: String = "0"
+    
+    var body: some View {
+        VStack {
+            Spacer()
+            Text((Double(amount.process()) ?? 0).trimmedString)
+                .font(.title3)
+            DynamicSizeInputField(text: $amount, maxLength: 13)
+                .border(.red, width: 1)
+                .font(.system(size: DynamicSizeInputField.dynamicSize(amount.description), weight: .semibold, design: .rounded))
+                .frame(height: 100)
+                .keyboardType(.decimalPad)
+            Spacer()
+            Spacer()
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            hideKeyboard()
+        }
+    }
+}
+
+struct DynamicSizeInputField: UIViewRepresentable {
+    @Binding var text: String
+    var maxLength: Int
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeUIView(context: Context) -> UITextField {
+        let textField = UITextField()
+        textField.delegate = context.coordinator
+        textField.text = text
+        textField.font = UIFont.systemFont(ofSize: DynamicSizeInputField.dynamicSize(text), weight: .bold)
+        textField.textColor = UIColor.label
+        textField.textAlignment = .center
+        textField.keyboardType = .decimalPad
+        textField.addTarget(context.coordinator, action: #selector(Coordinator.textFieldDidChange(_:)), for: .editingChanged)
+        return textField
+    }
+
+    func updateUIView(_ uiView: UITextField, context: Context) {
+        if text.isEmpty {
+            text = "0"
+        }
+        
+        uiView.text = String(text.prefix(maxLength))
+        uiView.font = UIFont.systemFont(ofSize: DynamicSizeInputField.dynamicSize(text))
+    }
+    
+    static func dynamicSize(_ text: String) -> CGFloat {
+        switch text.count {
+        case 0...5:
+            return 36
+        case 6...8:
+            return 34
+        case 9...12:
+            return 28
+        case 13...15:
+            return 24
+        default:
+            return 18
+        }
+    }
+
+    class Coordinator: NSObject, UITextFieldDelegate {
+        var parent: DynamicSizeInputField
+
+        init(parent: DynamicSizeInputField) {
+            self.parent = parent
+        }
+
+        @objc func textFieldDidChange(_ textField: UITextField) {
+            let newText = textField.text ?? ""
+            if newText.count > parent.maxLength {
+                textField.text = String(newText.prefix(parent.maxLength))
+            }
+            parent.text = (Double(newText.process()) ?? 0).trimmedString
+            textField.font = UIFont.systemFont(ofSize: DynamicSizeInputField.dynamicSize(parent.text))
+        }
     }
 }
