@@ -156,7 +156,7 @@ struct Stake: View {
                 Text("MAX")
                     .font(.footnote.bold())
                     .padding(10)
-                    .background(vm.layer2)
+                    .background(vm.maxAmount == (Double(vm.stakeAmount) ?? 0) ? vm.main : vm.layer2)
                     .clipShape(Capsule())
                     .onTapGesture {
                         vm.mediumFeedback?.impactOccurred()
@@ -763,9 +763,27 @@ struct StakeProvider: View {
     }
 }
 
+enum LoadingStatus {
+    case loading
+    case failure
+    case success
+    
+    @ViewBuilder
+    func buildView() -> some View {
+        switch self {
+        case .loading: Text("loading")
+        case .failure: Text("failure")
+        case .success: Text("success")
+        }
+    }
+}
+
 struct StakeConfirm: View {
     @Environment(\.presentationMode) var presentation
     @EnvironmentObject var vm: StakeViewModel
+    
+    @State var isLocked: Bool = true
+    @State var status: LoadingStatus = .loading
     
     @ViewBuilder
     func buildHeader() -> some View {
@@ -837,6 +855,15 @@ struct StakeConfirm: View {
         .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
     }
     
+    private func simulateRequest() {
+        status = .loading
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            withAnimation {
+                status = .success
+            }
+        }
+    }
+    
     var body: some View {
         ZStack {
             vm.layer1.ignoresSafeArea()
@@ -859,14 +886,36 @@ struct StakeConfirm: View {
                 hideKeyboard()
             }
             
+            .onChange(of: isLocked) { isLocked in
+                guard !isLocked else { return }
+                simulateRequest()
+            }
+            
             VStack {
                 Spacer()
-                Text("Confirm")
-                    .font(.headline.bold())
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(vm.main)
-                    .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
+                
+                if isLocked {
+                    GeometryReader { geometry in
+                        ZStack(alignment: .leading) {
+                            BackgroundComponent(color: vm.layer2, secondaryLabel: vm.secondaryLabel)
+                            DraggingComponent(
+                                isLocked: $isLocked, isLoading: false,
+                                maxWidth: geometry.size.width,
+                                main: Color.orange,
+                                layer2: Color.red,
+                                mainLabel: Color.green,
+                                secondaryLabel: Color.secondary
+                            )
+                        }
+                    }
+                    .frame(height: 56)
+                } else {
+                    status.buildView()
+                        .foregroundColor(vm.mainLabel)
+                        .font(.headline.bold())
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                }
             }
             .padding()
         }
@@ -930,6 +979,13 @@ extension Double {
         let formatter = NumberFormatter()
         formatter.minimumFractionDigits = 0
         formatter.maximumFractionDigits = 9
+        return formatter.string(for: self) ?? ""
+    }
+    
+    func trimmed(precision: Int = 9) -> String {
+        let formatter = NumberFormatter()
+        formatter.minimumFractionDigits = 0
+        formatter.maximumFractionDigits = precision
         return formatter.string(for: self) ?? ""
     }
 }

@@ -31,7 +31,7 @@ class SwapVM: ObservableObject {
     var didTapDismiss: EmptyHandler?
     
     // api
-    @Published var resp: SwapMethod?
+    @Published var methods: SwapMethod?
     @Published var simutale: SwapSimulate?
     
     @Published var swapableAsset: [SwapAsset] = []
@@ -49,13 +49,12 @@ class SwapVM: ObservableObject {
     
     // input
     var shouldCommitChange: Bool = false
-    @Published var sendToken: String = ""
-    @Published var sendAmount: String = ""
-    @Published var receiveToken: String = ""
+    @Published var offerToken: String = ""
+    @Published var offerAmount: String = ""
+    @Published var askToken: String = ""
     
     // computed
     @Published var receiveAmount: Double = 0
-    @Published var detail: SwapDetail?
     @Published var swapRate: String?
     
     // searching
@@ -73,7 +72,7 @@ class SwapVM: ObservableObject {
     init(didTapDismiss: EmptyHandler? = nil) {
         self.didTapDismiss = didTapDismiss
      
-        Publishers.CombineLatest3($sendToken, $sendAmount, $receiveToken)
+        Publishers.CombineLatest4($offerToken, $offerAmount, $askToken, $slippage)
             .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
             .sink { [weak self] _ in
                 self?.updateState()
@@ -122,9 +121,7 @@ class SwapVM: ObservableObject {
         }
         
         Network(apiFetcher: APIFetcher()).getSwapMethods(body: jsonData) { result in
-            DispatchQueue.main.async {
-                completion?(result)
-            }
+            completion?(result)
         }
     }
     
@@ -154,20 +151,10 @@ class SwapVM: ObservableObject {
             return
         }
         
+        print(jsonString as NSObject)
+        
         Network(apiFetcher: APIFetcher()).getSwapSimulate(body: jsonData) { result in
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let data):
-                    if let simulate = data.result {
-                        self.simutale = simulate
-                    }
-                    
-                case .failure(let error):
-                    print(error.localizedDescription)
-                }
-                
-                completion?(result)
-            }
+            completion?(result)
         }
     }
     
@@ -193,41 +180,62 @@ class SwapVM: ObservableObject {
         
         // reset
         self.swapRate = nil
-        self.detail = nil
+        self.simutale = nil
         
-        let dontHaveSendToken = sendToken.isEmpty
-        let dontHaveSendAmount = sendAmount.isEmpty
-        let dontHaveReceiveToken = receiveToken.isEmpty
-        let dontHaveReceiveAmount = receiveAmount == 0
-        let dontHaveProvider = detail?.provider == nil
+        let dontHaveOfferToken = offerToken.isEmpty
+        let dontHaveOfferAmount = offerAmount.isEmpty
+        let dontHaveAskToken = askToken.isEmpty
+        let dontHaveAskAmount = receiveAmount == 0
+        let dontHaveSimulate = simutale == nil
         
-        if dontHaveSendAmount {
+        if dontHaveOfferAmount {
             status = .enterAmount
             return
         }
         
-        if dontHaveSendToken || dontHaveReceiveToken {
+        if dontHaveOfferToken || dontHaveAskToken {
             status = .chooseToken
             return
         }
         
-        if dontHaveProvider || dontHaveProvider {
+        if dontHaveSimulate {
             status = .loading
             
-            // mock loading detail
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
-                self.swapRate = "1 \(self.sendToken) ~= ? \(self.receiveToken)"
-                self.detail = SwapDetail.defaultInstance
-                self.status = .ready
-            })
+//            // mock loading detail
+//            DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: {
+//                self.swapRate = "1 \(self.sendToken) ~= ? \(self.receiveToken)"
+//                self.detail = SwapDetail.defaultInstance
+//                self.status = .ready
+//            })
+            
+            simulateSwap(
+                offerAddress: self.swapableAsset.first(where: { $0.symbol?.uppercased() == self.offerToken.uppercased() })?.contractAddress ?? "",
+                askAddress: self.swapableAsset.first(where: { $0.symbol?.uppercased() == self.askToken.uppercased() })?.contractAddress ?? "",
+                offerUnits: "\(Int((Double(self.offerAmount) ?? 0) * 1_000_000_000))",
+                slippage: "\(slippage)"
+            ) { result in
+                DispatchQueue.main.async {
+                    switch result {
+                    case .success(let data):
+                        if let simulate = data.result {
+                            self.simutale = simulate
+                        }
+                        
+                    case .failure(let error):
+                        print(error.localizedDescription)
+                    }
+                    
+                    self.status = .ready
+                }
+            }
             
             return
         }
         
-        if !dontHaveSendAmount &&
-            !dontHaveReceiveToken &&
-            !dontHaveReceiveAmount &&
-            !dontHaveProvider {
+        if !dontHaveOfferAmount &&
+            !dontHaveAskToken &&
+            !dontHaveAskAmount &&
+            !dontHaveSimulate {
             status = .ready
             return
         }
@@ -262,9 +270,14 @@ struct Swap: View {
                 .font(.title3.bold())
                 .foregroundColor(vm.mainLabel)
         } left: {
-            vm.layer2
-                .frame(width: 32, height: 32)
-                .clipShape(Circle())
+            NavigationLink {
+                SwapSlippage()
+                    .environmentObject(vm)
+            } label: {
+                vm.layer2
+                    .frame(width: 32, height: 32)
+                    .clipShape(Circle())
+            }
         } right: {
             vm.layer2
                 .frame(width: 32, height: 32)
@@ -307,7 +320,7 @@ struct Swap: View {
                     .foregroundColor(vm.secondaryLabel)
                 Spacer()
                 
-                if let asset = vm.wallet[vm.sendToken] {
+                if let asset = vm.wallet[vm.offerToken] {
                     Text("Balance: \(String(asset.balance)) \(asset.code)")
                         .font(.callout)
                         .foregroundColor(vm.secondaryLabel)
@@ -315,18 +328,18 @@ struct Swap: View {
                         .font(.body.bold())
                         .onTapGesture {
                             vm.mediumFeedback?.impactOccurred()
-                            vm.sendAmount = String(asset.balance)
+                            vm.offerAmount = String(asset.balance)
                         }
                 }
             }
             
             HStack(alignment: .center) {
-                buildTokenButton(token: $vm.sendToken)
+                buildTokenButton(token: $vm.offerToken, isOfferAsset: .constant(true))
                 Spacer()
-                TextField("0", text: $vm.sendAmount)
+                TextField("0", text: $vm.offerAmount)
                     .fixedSize(horizontal: true, vertical: false)
                     .font(.title.bold())
-                    .limitLength($vm.sendAmount, to: 9)
+                    .limitLength($vm.offerAmount, to: 9)
                     .keyboardType(.decimalPad)
             }
         }
@@ -347,9 +360,9 @@ struct Swap: View {
             }
             
             HStack(alignment: .center) {
-                buildTokenButton(token: $vm.receiveToken)
+                buildTokenButton(token: $vm.askToken, isOfferAsset: .constant(false))
                 Spacer()
-                Text(String(vm.receiveAmount))
+                Text(vm.simutale?.getAskUnits() ?? "0")
                     .font(.title.bold())
                     .foregroundColor(vm.mainLabel)
             }
@@ -366,7 +379,8 @@ struct Swap: View {
                 Divider()
             }
             
-            vm.detail?.buildView()
+            vm.simutale?.buildView(mainLabel: vm.mainLabel, secondaryLabel: vm.secondaryLabel,
+                                   askToken: vm.askToken, feeToken: vm.offerToken)
         }
         .padding()
         .background(vm.layer2)
@@ -395,9 +409,9 @@ struct Swap: View {
             vm.mediumFeedback?.impactOccurred()
             
             // swap
-            let temp = vm.receiveToken
-            vm.receiveToken = vm.sendToken
-            vm.sendToken = temp
+            let temp = vm.askToken
+            vm.askToken = vm.offerToken
+            vm.offerToken = temp
             
             vm.receiveAmount = 0
         }
@@ -427,9 +441,9 @@ struct Swap: View {
     }
     
     @ViewBuilder
-    func buildTokenButton(token: Binding<String>) -> some View {
+    func buildTokenButton(token: Binding<String>, isOfferAsset: Binding<Bool>) -> some View {
         NavigationLink {
-            SwapToken(token: token)
+            SwapToken(token: token, isOfferAsset: isOfferAsset)
                 .environmentObject(vm)
         } label: {
             if token.wrappedValue.isEmpty {
@@ -521,19 +535,21 @@ struct Swap: View {
                     vm.initHaptic()
                 }
                 
-                if vm.resp == nil {
+                if vm.methods == nil {
                     vm.update { result in
-                        print(result)
-                        
-                        switch result {
-                        case .success(let data):
-                            if let method = data.result {
-                                vm.resp = method
-                                vm.swapableAsset = method.assets ?? []
-                            }
+                        DispatchQueue.main.async {
+                            print(result)
                             
-                        case .failure(let error):
-                            print(error.localizedDescription)
+                            switch result {
+                            case .success(let data):
+                                if let method = data.result {
+                                    vm.methods = method
+                                    vm.swapableAsset = method.assets ?? []
+                                }
+                                
+                            case .failure(let error):
+                                print(error.localizedDescription)
+                            }
                         }
                     }
                 }
@@ -549,6 +565,7 @@ struct SwapToken: View {
     
     @EnvironmentObject var vm: SwapVM
     @Binding var token: String
+    @Binding var isOfferAsset: Bool
     
     @ViewBuilder
     func buildHeader() -> some View {
@@ -601,10 +618,23 @@ struct SwapToken: View {
                 .clipShape(Capsule(style: .continuous))
                 .onTapGesture {
                     vm.mediumFeedback?.impactOccurred()
-                    token = tag.uppercased()
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: {
-                        presentation.wrappedValue.dismiss()
-                    })
+                    
+                    switch isOfferAsset {
+                    case false:
+                        if vm.offerToken.uppercased() != tag.uppercased() {
+                            token = tag.uppercased()
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: {
+                                presentation.wrappedValue.dismiss()
+                            })
+                        }
+                    case true:
+                        if vm.askToken.uppercased() != tag.uppercased() {
+                            token = tag.uppercased()
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: {
+                                presentation.wrappedValue.dismiss()
+                            })
+                        }
+                    }
                 }
             }
         }
@@ -667,11 +697,11 @@ struct SwapToken: View {
                         .frame(height: 76)
                         .contentShape(Rectangle())
                         .onTapGesture {
-//                            vm.mediumFeedback?.impactOccurred()
-//                            asset = token.uppercased()
-//                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: {
-//                                presentation.wrappedValue.dismiss()
-//                            })
+                            vm.mediumFeedback?.impactOccurred()
+                            token = asset.symbol?.uppercased() ?? ""
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: {
+                                presentation.wrappedValue.dismiss()
+                            })
                         }
                         
                         Divider()
@@ -792,12 +822,34 @@ struct SwapConfirm: View {
     }
     
     @ViewBuilder
+    func buildTokenIcon(width: CGFloat, urlString: String?) -> some View {
+        if let url = URL(string: urlString ?? "") {
+            KFImage(url)
+                .placeholder({
+                    Image(systemName: "questionmark.circle.fill")
+                        .resizable()
+                        .frame(width: width, height: width, alignment: .center)
+                        .clipShape(Circle())
+                })
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: width, height: width, alignment: .center)
+                .clipShape(Circle())
+        } else {
+            Image(systemName: "questionmark.circle.fill")
+                .resizable()
+                .frame(width: width, height: width, alignment: .center)
+                .clipShape(Circle())
+        }
+    }
+    
+    @ViewBuilder
     func buildFromAssetView() -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center) {
                 Text("Send")
                 Spacer()
-                Text("$6000.01")
+                Text("? USD")
             }
             .font(.callout)
             .foregroundColor(vm.secondaryLabel)
@@ -805,9 +857,13 @@ struct SwapConfirm: View {
             HStack(alignment: .center) {
                 Button {} label: {
                     HStack(alignment: .center, spacing: 4) {
-                        Color.primary.frame(width: 24, height: 24)
-                            .clipShape(Capsule())
-                        Text("TON")
+                        buildTokenIcon(
+                            width: 24,
+                            urlString: vm.swapableAsset.first(where: {
+                                $0.symbol?.uppercased() == vm.offerToken.uppercased()
+                            })?.imageURL
+                        )
+                        Text(vm.offerToken.uppercased())
                             .font(.body.bold())
                             .foregroundColor(vm.mainLabel)
                     }
@@ -819,7 +875,7 @@ struct SwapConfirm: View {
                 
                 Spacer()
                 
-                Text("1000")
+                Text(vm.offerAmount)
                     .font(.title.bold())
                     .foregroundColor(vm.mainLabel)
             }
@@ -836,7 +892,7 @@ struct SwapConfirm: View {
             HStack(alignment: .center) {
                 Text("Receive")
                 Spacer()
-                Text("$600010,10")
+                Text("? USD")
             }
             .font(.callout)
             .foregroundColor(vm.secondaryLabel)
@@ -844,9 +900,13 @@ struct SwapConfirm: View {
             HStack(alignment: .center) {
                 Button {} label: {
                     HStack(alignment: .center, spacing: 4) {
-                        Color.primary.frame(width: 24, height: 24)
-                            .clipShape(Capsule())
-                        Text("USD₮")
+                        buildTokenIcon(
+                            width: 24,
+                            urlString: vm.swapableAsset.first(where: {
+                                $0.symbol?.uppercased() == vm.askToken.uppercased()
+                            })?.imageURL
+                        )
+                        Text(vm.askToken.uppercased())
                             .font(.body.bold())
                             .foregroundColor(vm.mainLabel)
                     }
@@ -858,14 +918,15 @@ struct SwapConfirm: View {
                 
                 Spacer()
                 
-                Text("6000")
+                Text(vm.simutale?.getAskUnits() ?? "~")
                     .font(.title.bold())
                     .foregroundColor(vm.mainLabel)
             }
             
             Divider()
             
-            vm.detail?.buildView()
+            vm.simutale?.buildView(mainLabel: vm.mainLabel, secondaryLabel: vm.secondaryLabel,
+                                   askToken: vm.askToken, feeToken: vm.offerToken)
         }
         .padding()
         .background(vm.layer2)
@@ -884,6 +945,7 @@ struct SwapConfirm: View {
                     .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
                     .onTapGesture {
                         vm.mediumFeedback?.impactOccurred()
+                        presentation.wrappedValue.dismiss()
                     }
                 
                 Text("Confirm")
@@ -954,18 +1016,19 @@ import CoreHaptics
 struct SwapSlippage: View {
     @Environment(\.presentationMode) var presentation
     @EnvironmentObject var vm: SwapVM
+    @State var slippage: Double = 0
     
-    @State var temp: String = ""
     
     @ViewBuilder
     func textField(amount: Binding<Double>, isFocus: Binding<Bool>, asset: String) -> some View {
         let text = Binding<String>(
             get: {
-                amount.wrappedValue > 0 ?
-                    String(format: "%.2f", amount.wrappedValue) : "0"
+//                amount.wrappedValue > 0 ?
+//                    String(format: "%.3f", amount.wrappedValue) : "0"
+                amount.wrappedValue.trimmedString
             },
             set: { text in
-                vm.slippage = Double(text) ?? 0
+                self.slippage = Double(text) ?? 0
             }
         )
         
@@ -1043,7 +1106,7 @@ struct SwapSlippage: View {
         }
         
         if vm.isExpert {
-            textField(amount: $vm.slippage, isFocus: .constant(false), asset: "%")
+            textField(amount: $slippage, isFocus: .constant(false), asset: "%")
                 .padding()
                 .background(vm.layer2)
                 .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
@@ -1071,12 +1134,12 @@ struct SwapSlippage: View {
                     .background(vm.layer2)
                     .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
                     .onTapGesture {
-                        vm.slippage = slippage
                         vm.mediumFeedback?.impactOccurred()
+                        self.slippage = slippage
                     }
                     .overlay(
                         RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous)
-                            .stroke(vm.main, lineWidth: vm.slippage == slippage ? 2 : 0)
+                            .stroke(vm.main, lineWidth: self.slippage == slippage ? 2 : 0)
                     )
             }
         }
@@ -1093,8 +1156,12 @@ struct SwapSlippage: View {
                 buildExpertMode()
                 Spacer()
             }
-            .navigationBarBackButtonHidden(true)
             
+            .onAppear {
+                slippage = vm.slippage
+            }
+            
+            .navigationBarBackButtonHidden(true)
             .background(vm.layer1)
             .padding()
             
@@ -1111,6 +1178,10 @@ struct SwapSlippage: View {
                     .padding()
                     .background(vm.main)
                     .clipShape(RoundedRectangle(cornerRadius: vm.cornerRadius, style: .continuous))
+                    .onTapGesture {
+                        vm.slippage = slippage
+                        presentation.wrappedValue.dismiss()
+                    }
             }
             .padding()
         }
@@ -1198,81 +1269,81 @@ struct FlowLayout<Data, RowContent>: View where Data: RandomAccessCollection, Ro
     }
 }
 
-struct SwapDetail {
-    
-    var priceImpact: Double?
-    var minimumReceived: Double?
-    var liquidityProviderFee: Double?
-    var blockchainFee: String?
-    var route: String?
-    var provider: String?
-    
-    var fromAsset: String?
-    var toAsset: String?
-    
-    var mainLabel: Color = Color.primary
-    var secondaryLabel: Color = Color.secondary
-    
-    static var defaultInstance: SwapDetail = .init(
-        priceImpact: 0.001,
-        minimumReceived: 6000.01,
-        liquidityProviderFee: 0.00000000001,
-        blockchainFee: "0.11 - 0.17 TON",
-        route: "TON >> USDT",
-        provider: "STON.fi",
-        fromAsset: "TON",
-        toAsset: "USDT",
-        mainLabel: Color.primary,
-        secondaryLabel: Color.secondary
-    )
-    
-    @ViewBuilder
-    func buildDetailRow(title: String, content: String, didTapInfo: (()->Void)? = nil) -> some View {
-        HStack(alignment: .center) {
-            HStack(alignment: .center, spacing: 2) {
-                Text(title)
-                if let didTapInfo {
-                    Image(systemName: "info.circle.fill")
-                }
-            }
-            .foregroundColor(secondaryLabel)
-            .onTapGesture { // for user to tap on the whole text, not just info icon
-                didTapInfo?()
-            }
-            
-            Spacer()
-            Text(content)
-                .foregroundColor(mainLabel)
-        }
-    }
-    
-    @ViewBuilder
-    func buildView() -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if let priceImpact {
-                buildDetailRow(title: "priceImpact", content: String(priceImpact) + "%") {
-                    print("here is your code")
-                }
-            }
-            if let minimumReceived {
-                buildDetailRow(title: "minimumReceived", content: String(minimumReceived))
-            }
-            if let liquidityProviderFee {
-                buildDetailRow(title: "liquidityProviderFee", content: String(liquidityProviderFee))
-            }
-            if let blockchainFee {
-                buildDetailRow(title: "blockchainFee", content: String(blockchainFee))
-            }
-            if let route {
-                buildDetailRow(title: "route", content: String(route))
-            }
-            if let provider {
-                buildDetailRow(title: "provider", content: String(provider))
-            }
-        }
-        .font(.callout.bold())
-    }
-}
+//struct SwapDetail {
+//    
+//    var priceImpact: Double?
+//    var minimumReceived: Double?
+//    var liquidityProviderFee: Double?
+//    var blockchainFee: String?
+//    var route: String?
+//    var provider: String?
+//    
+//    var fromAsset: String?
+//    var toAsset: String?
+//    
+//    var mainLabel: Color = Color.primary
+//    var secondaryLabel: Color = Color.secondary
+//    
+//    static var defaultInstance: SwapDetail = .init(
+//        priceImpact: 0.001,
+//        minimumReceived: 6000.01,
+//        liquidityProviderFee: 0.00000000001,
+//        blockchainFee: "0.11 - 0.17 TON",
+//        route: "TON >> USDT",
+//        provider: "STON.fi",
+//        fromAsset: "TON",
+//        toAsset: "USDT",
+//        mainLabel: Color.primary,
+//        secondaryLabel: Color.secondary
+//    )
+//    
+//    @ViewBuilder
+//    func buildDetailRow(title: String, content: String, didTapInfo: (()->Void)? = nil) -> some View {
+//        HStack(alignment: .center) {
+//            HStack(alignment: .center, spacing: 2) {
+//                Text(title)
+//                if let didTapInfo {
+//                    Image(systemName: "info.circle.fill")
+//                }
+//            }
+//            .foregroundColor(secondaryLabel)
+//            .onTapGesture { // for user to tap on the whole text, not just info icon
+//                didTapInfo?()
+//            }
+//            
+//            Spacer()
+//            Text(content)
+//                .foregroundColor(mainLabel)
+//        }
+//    }
+//    
+//    @ViewBuilder
+//    func buildView() -> some View {
+//        VStack(alignment: .leading, spacing: 12) {
+//            if let priceImpact {
+//                buildDetailRow(title: "priceImpact", content: String(priceImpact) + "%") {
+//                    print("here is your code")
+//                }
+//            }
+//            if let minimumReceived {
+//                buildDetailRow(title: "minimumReceived", content: String(minimumReceived))
+//            }
+//            if let liquidityProviderFee {
+//                buildDetailRow(title: "liquidityProviderFee", content: String(liquidityProviderFee))
+//            }
+//            if let blockchainFee {
+//                buildDetailRow(title: "blockchainFee", content: String(blockchainFee))
+//            }
+//            if let route {
+//                buildDetailRow(title: "route", content: String(route))
+//            }
+//            if let provider {
+//                buildDetailRow(title: "provider", content: String(provider))
+//            }
+//        }
+//        .font(.callout.bold())
+//    }
+//}
 
 
 struct LimitLengthModifier: ViewModifier {

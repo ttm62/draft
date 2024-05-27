@@ -13,6 +13,7 @@ struct draftApp: App {
     @State var showBuySell: Bool = false
     @State var showSwap: Bool = false
     @State var showStake: Bool = false
+    @State var showSlide: Bool = false
     
     var body: some Scene {
         WindowGroup {
@@ -26,6 +27,8 @@ struct draftApp: App {
                     Text("Swap").onTapGesture{ showSwap = true }
                     Spacer()
                     Text("Stake").onTapGesture{ showStake = true }
+                    Spacer()
+                    Text("Other").onTapGesture { showSlide = true }
                     Spacer()
                 }
                 
@@ -47,6 +50,10 @@ struct draftApp: App {
                     NavigationView { Stake(vm: StakeViewModel(didTapDismiss: {
                         showStake = false
                     }))}
+                })
+                
+                .sheet(isPresented: $showSlide, content: {
+                    NavigationView { DragDemo() }
                 })
             }
             

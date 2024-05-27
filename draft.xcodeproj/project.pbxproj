@@ -18,6 +18,7 @@
 		257647B52BFB2226009EBEBC /* Network.swift in Sources */ = {isa = PBXBuildFile; fileRef = 257647B42BFB2226009EBEBC /* Network.swift */; };
 		257647B72BFB22AD009EBEBC /* View+.swift in Sources */ = {isa = PBXBuildFile; fileRef = 257647B62BFB22AD009EBEBC /* View+.swift */; };
 		257647B92BFB22C2009EBEBC /* Network+FiatMethod.swift in Sources */ = {isa = PBXBuildFile; fileRef = 257647B82BFB22C2009EBEBC /* Network+FiatMethod.swift */; };
+		25B34F782C04C430003561B7 /* DraggingComponent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25B34F772C04C430003561B7 /* DraggingComponent.swift */; };
 		25C2F57F2C0351FA00146B4C /* Network+SwapMethod.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25C2F57E2C0351FA00146B4C /* Network+SwapMethod.swift */; };
 		25C2F5842C035C8900146B4C /* Kingfisher in Frameworks */ = {isa = PBXBuildFile; productRef = 25C2F5832C035C8900146B4C /* Kingfisher */; };
 		25F149F62C002D6100D50751 /* Stake.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25F149F52C002D6100D50751 /* Stake.swift */; };
@@ -36,6 +37,7 @@
 		257647B42BFB2226009EBEBC /* Network.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Network.swift; sourceTree = "<group>"; };
 		257647B62BFB22AD009EBEBC /* View+.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "View+.swift"; sourceTree = "<group>"; };
 		257647B82BFB22C2009EBEBC /* Network+FiatMethod.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Network+FiatMethod.swift"; sourceTree = "<group>"; };
+		25B34F772C04C430003561B7 /* DraggingComponent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DraggingComponent.swift; sourceTree = "<group>"; };
 		25C2F57E2C0351FA00146B4C /* Network+SwapMethod.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Network+SwapMethod.swift"; sourceTree = "<group>"; };
 		25F149F52C002D6100D50751 /* Stake.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Stake.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -73,6 +75,7 @@
 			children = (
 				257647A32BFB21BA009EBEBC /* draftApp.swift */,
 				2566B4602BFB52A300C4426F /* SwapConfig.swift */,
+				25B34F772C04C430003561B7 /* DraggingComponent.swift */,
 				25F149F52C002D6100D50751 /* Stake.swift */,
 				257647A52BFB21BA009EBEBC /* BuySell.swift */,
 				2566B45C2BFB272500C4426F /* Draft.swift */,
@@ -191,6 +194,7 @@
 				2566B4612BFB52A300C4426F /* SwapConfig.swift in Sources */,
 				25F149F62C002D6100D50751 /* Stake.swift in Sources */,
 				257647A42BFB21BA009EBEBC /* draftApp.swift in Sources */,
+				25B34F782C04C430003561B7 /* DraggingComponent.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

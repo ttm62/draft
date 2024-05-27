@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 extension Network {
     func getSwapMethods(body: Data?, completion: @escaping (Result<RPCResponse<SwapMethod>, HTTPError>) -> Void) {
@@ -64,6 +65,71 @@ struct SwapSimulate: Codable {
         case feeAddress = "fee_address"
         case feeUnits = "fee_units"
         case feePercent = "fee_percent"
+    }
+    
+    func getAskUnits() -> String {
+        if let askUnits, let parsedAsk = Double(askUnits) {
+            return (parsedAsk/1_000_000_000).trimmed(precision: 4)
+        } else {
+            return "0"
+        }
+    }
+    
+    @ViewBuilder
+    func buildDetailRow(
+        title: String, content: String,
+        mainLabel: Color, secondaryLabel: Color,
+        didTapInfo: (()->Void)? = nil
+    ) -> some View {
+        HStack(alignment: .center) {
+            HStack(alignment: .center, spacing: 2) {
+                Text(title)
+                if let didTapInfo {
+                    Image(systemName: "info.circle.fill")
+                }
+            }
+            .foregroundColor(secondaryLabel)
+            .onTapGesture { // for user to tap on the whole text, not just info icon
+                didTapInfo?()
+            }
+            
+            Spacer()
+            Text(content)
+                .foregroundColor(mainLabel)
+        }
+    }
+    
+    @ViewBuilder
+    func buildView(mainLabel: Color, secondaryLabel: Color, askToken: String, feeToken: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let priceImpact = priceImpact, let parsedImpact = Double(priceImpact) {
+                buildDetailRow(title: "priceImpact", content: (parsedImpact * 100).trimmedString + "%",
+                               mainLabel: mainLabel, secondaryLabel: secondaryLabel) {
+                    print("do something on tap info")
+                }
+            }
+            if let minAskUnits = minAskUnits, let parsedMinAskUnits = Double(minAskUnits) {
+                buildDetailRow(title: "minimumReceived", content: (parsedMinAskUnits/1_000_000_000).trimmed(precision: 4) + " \(askToken.uppercased())",
+                               mainLabel: mainLabel, secondaryLabel: secondaryLabel)
+            }
+            if let feeUnits = feeUnits, let parsedFeeUnits = Double(feeUnits) {
+                buildDetailRow(title: "liquidityProviderFee", content: (parsedFeeUnits/1_000_000_000).trimmed(precision: 4) + " \(askToken.uppercased())",
+                               mainLabel: mainLabel, secondaryLabel: secondaryLabel)
+            }
+            if true { // if let blockchainFee {
+                buildDetailRow(title: "blockchainFee", content: "0.08 - 0.25 TON",
+                               mainLabel: mainLabel, secondaryLabel: secondaryLabel)
+            }
+            if true { // if let route {
+                buildDetailRow(title: "route", content: "\(feeToken.uppercased()) » \(askToken.uppercased())",
+                               mainLabel: mainLabel, secondaryLabel: secondaryLabel)
+            }
+            if true { // if let provider {
+                buildDetailRow(title: "provider", content: "STON.fi",
+                               mainLabel: mainLabel, secondaryLabel: secondaryLabel)
+            }
+        }
+        .font(.callout.bold())
     }
 }
 

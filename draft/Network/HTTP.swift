@@ -44,7 +44,7 @@ class APIFetcher: HTTPClient {
 
         URLSession.shared.dataTask(with: request) { data, urlResponse, error in
             let responseData = String(data: data ?? "".asData, encoding: .utf8)
-            print(responseData)
+//            print(responseData)
             
             // 1 check the response
             guard let urlResponse = urlResponse as? HTTPURLResponse else {
